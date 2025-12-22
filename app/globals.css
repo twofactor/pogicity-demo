@@ -1,0 +1,177 @@
+@import "tailwindcss";
+
+:root {
+  /* RCT1 Color Palette */
+  --rct-frame-dark: #4a1a1a;
+  --rct-frame-mid: #6b2a2a;
+  --rct-frame-light: #8b4a4a;
+  --rct-frame-highlight: #ab6a6a;
+
+  --rct-panel-dark: #8b7355;
+  --rct-panel-mid: #b49a7c;
+  --rct-panel-light: #d4c4a8;
+  --rct-panel-highlight: #e8dcc8;
+
+  --rct-button-dark: #3a3a3a;
+  --rct-button-mid: #5a5a5a;
+  --rct-button-light: #7a7a7a;
+  --rct-button-highlight: #9a9a9a;
+
+  --rct-text: #000000;
+  --rct-text-light: #ffffff;
+  --rct-text-shadow: #2a0a0a;
+
+  --rct-grass: #2d4a1f;
+  --rct-status-bg: #1a1a2a;
+
+  /* Blue UI Palette */
+  --rct-blue-face: #6ca6e8;
+  --rct-blue-light: #a3cdf9;
+  --rct-blue-dark: #366ba8;
+  --rct-blue-shadow: #244b7a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-jersey);
+  --font-mono: var(--font-jersey);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: #4a5d6a !important;
+  color: var(--rct-text);
+  font-family: var(--font-jersey), "Arial", sans-serif;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  image-rendering: pixelated;
+  /* TODO: Add custom cursor - cursor: url('/UI/cursor.png') 0 0, auto; */
+}
+
+/* RCT1-style beveled button */
+.rct-button {
+  background: var(--rct-button-mid);
+  border: 1px solid;
+  border-color: var(--rct-button-light) var(--rct-button-dark)
+    var(--rct-button-dark) var(--rct-button-light);
+  padding: 4px 8px;
+  cursor: pointer;
+  image-rendering: pixelated;
+  font-family: var(--font-jersey), "Arial", sans-serif;
+  font-size: 14px;
+}
+
+.rct-button:hover {
+  background: var(--rct-button-highlight);
+}
+
+.rct-button:active,
+.rct-button.active {
+  border-color: var(--rct-button-dark) var(--rct-button-light)
+    var(--rct-button-light) var(--rct-button-dark);
+  background: var(--rct-button-dark);
+}
+
+/* Blue Toolbar Button (RCT2/Locomotion style) */
+.rct-blue-button {
+  background: var(--rct-blue-face);
+  border: 2px solid;
+  border-color: var(--rct-blue-light) var(--rct-blue-dark) var(--rct-blue-dark)
+    var(--rct-blue-light);
+  padding: 0; /* Icons contain their own padding */
+  cursor: pointer;
+  image-rendering: pixelated;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px; /* Slight rounded corners as seen in screenshot */
+  box-shadow: 1px 1px 0px var(--rct-blue-shadow);
+}
+
+.rct-blue-button:hover {
+  filter: brightness(1.1);
+}
+
+.rct-blue-button:active {
+  border-color: var(--rct-blue-dark) var(--rct-blue-light) var(--rct-blue-light)
+    var(--rct-blue-dark);
+  filter: brightness(0.9);
+  box-shadow: inset 1px 1px 0px var(--rct-blue-shadow);
+  transform: translate(1px, 1px);
+}
+
+/* RCT1-style frame (maroon) */
+.rct-frame {
+  background: var(--rct-frame-mid);
+  border: 1px solid;
+  border-color: var(--rct-frame-light) var(--rct-frame-dark)
+    var(--rct-frame-dark) var(--rct-frame-light);
+}
+
+/* RCT1-style panel (tan/cream) */
+.rct-panel {
+  background: var(--rct-panel-mid);
+  border: 1px solid;
+  border-color: var(--rct-panel-light) var(--rct-panel-dark)
+    var(--rct-panel-dark) var(--rct-panel-light);
+}
+
+/* RCT1-style inset panel */
+.rct-inset {
+  background: var(--rct-panel-dark);
+  border: 1px solid;
+  border-color: var(--rct-panel-dark) var(--rct-panel-light)
+    var(--rct-panel-light) var(--rct-panel-dark);
+}
+
+/* Window title bar */
+.rct-titlebar {
+  background: var(--rct-frame-mid);
+  color: var(--rct-text-light);
+  font-weight: bold;
+  font-size: 18px;
+  padding: 6px 10px;
+  text-shadow: 1px 1px 0 var(--rct-text-shadow);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: move;
+  user-select: none;
+  border-bottom: 1px solid var(--rct-frame-dark);
+}
+
+/* Close button */
+.rct-close {
+  width: 16px;
+  height: 16px;
+  background: var(--rct-frame-dark);
+  border: 1px solid;
+  border-color: var(--rct-frame-light) var(--rct-frame-dark)
+    var(--rct-frame-dark) var(--rct-frame-light);
+  color: var(--rct-text-light);
+  font-size: 10px;
+  line-height: 10px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.rct-close:hover {
+  background: var(--rct-frame-light);
+}
+
+/* Marquee animation for music player */
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
