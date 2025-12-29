@@ -1267,6 +1267,60 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     icon: "🏬",
     supportsRotation: true,
   },
+  "spanish-style-office": {
+    id: "spanish-style-office",
+    name: "Spanish Style Office",
+    category: "commercial",
+    footprint: { width: 3, height: 6 },
+    footprintByOrientation: {
+      south: { width: 3, height: 6 },
+      north: { width: 3, height: 6 },
+      east: { width: 6, height: 3 },
+      west: { width: 6, height: 3 },
+    },
+    sprites: {
+      south: "/Building/commercial/3x6spanish_style_office_south.png",
+      north: "/Building/commercial/3x6spanish_style_office_north.png",
+      east: "/Building/commercial/6x3spanish_style_office_east.png",
+      west: "/Building/commercial/6x3spanish_style_office_west.png",
+    },
+    icon: "🏛️",
+    supportsRotation: true,
+  },
+  "craftsman-house": {
+    id: "craftsman-house",
+    name: "Craftsman House",
+    category: "residential",
+    footprint: { width: 2, height: 4 },
+    footprintByOrientation: {
+      south: { width: 2, height: 4 },
+      north: { width: 2, height: 4 },
+      east: { width: 4, height: 2 },
+      west: { width: 4, height: 2 },
+    },
+    sprites: {
+      south: "/Building/residential/2x4craftsman_house_south.png",
+      north: "/Building/residential/2x4craftsman_house_north.png",
+      east: "/Building/residential/4x2craftsman_house_east.png",
+      west: "/Building/residential/4x2craftsman_house_west.png",
+    },
+    icon: "🏡",
+    supportsRotation: true,
+  },
+  "shingle-house": {
+    id: "shingle-house",
+    name: "Shingle House",
+    category: "residential",
+    footprint: { width: 4, height: 4 },
+    sprites: {
+      south: "/Building/residential/4x4shingle_house_south.png",
+      north: "/Building/residential/4x4shingle_house_north.png",
+      east: "/Building/residential/4x4shingle_house_east.png",
+      west: "/Building/residential/4x4shingle_house_west.png",
+    },
+    icon: "🏠",
+    supportsRotation: true,
+  },
 };
 
 // Helper to get building by ID

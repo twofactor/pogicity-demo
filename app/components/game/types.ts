@@ -76,8 +76,8 @@ export interface Car {
   carType: CarType;
 }
 
-export const GRID_WIDTH = 48;
-export const GRID_HEIGHT = 48;
+export const GRID_WIDTH = 128;
+export const GRID_HEIGHT = 128;
 
 export const CAR_SPEED = 0.05;
 

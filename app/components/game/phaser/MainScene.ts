@@ -167,6 +167,7 @@ export class MainScene extends Phaser.Scene {
   private baseScrollX: number = 0;
   private baseScrollY: number = 0;
   private wasDriving: boolean = false;
+  private needsCameraCenter: boolean = true; // Center camera on first update
 
   private shakeAxis: "x" | "y" = "y";
   private shakeOffset: number = 0;
@@ -263,6 +264,8 @@ export class MainScene extends Phaser.Scene {
     // Initial render
     this.renderGrid();
 
+    // Camera will be centered on first update frame (when dimensions are known)
+
     // Load character GIF animations asynchronously
     this.loadCharacterAnimations();
 
@@ -326,6 +329,12 @@ export class MainScene extends Phaser.Scene {
     this.updateCharacters();
     this.updateCars();
     this.updatePlayerCar();
+
+    // Center camera on first frame (camera dimensions now known)
+    if (this.needsCameraCenter) {
+      this.centerCameraOnMap();
+      this.needsCameraCenter = false;
+    }
 
     // Handle camera movement (when not driving)
     this.updateCamera(delta);
@@ -1313,29 +1322,18 @@ export class MainScene extends Phaser.Scene {
   }
 
   // Receive grid updates from React (differential update)
-  updateGrid(newGrid: GridCell[][]): void {
-    // Find changed tiles and mark for update
-    for (let y = 0; y < GRID_HEIGHT; y++) {
-      for (let x = 0; x < GRID_WIDTH; x++) {
-        const oldCell = this.grid[y]?.[x];
-        const newCell = newGrid[y]?.[x];
-
-        if (!oldCell || !newCell) continue;
-
-        // Check if tile changed
-        if (
-          oldCell.type !== newCell.type ||
-          oldCell.buildingId !== newCell.buildingId ||
-          oldCell.isOrigin !== newCell.isOrigin ||
-          oldCell.buildingOrientation !== newCell.buildingOrientation ||
-          oldCell.underlyingTileType !== newCell.underlyingTileType
-        ) {
-          this.gridDirtyTiles.add(`${x},${y}`);
-        }
-      }
+  // Mark specific tiles as dirty (called from React after grid mutations)
+  markTilesDirty(tiles: Array<{ x: number; y: number }>): void {
+    for (const { x, y } of tiles) {
+      this.gridDirtyTiles.add(`${x},${y}`);
     }
+    if (tiles.length > 0) {
+      this.gridDirty = true;
+    }
+  }
 
-    // Update grid reference
+  updateGrid(newGrid: GridCell[][]): void {
+    // Update grid reference (React now tells us what changed via markTilesDirty)
     this.grid = newGrid;
 
     if (this.gridDirtyTiles.size > 0) {
@@ -1644,21 +1642,22 @@ export class MainScene extends Phaser.Scene {
     if (this.isReady) {
       const camera = this.cameras.main;
 
-      // Store the current center point (midPoint gives center of what camera sees)
+      // Store the current center point in WORLD coordinates
       const centerX = camera.midPoint.x;
       const centerY = camera.midPoint.y;
 
       // Apply new zoom
       camera.setZoom(zoom);
 
-      // Re-center on the same point, then round for pixel-perfect rendering
-      camera.centerOn(centerX, centerY);
-      camera.scrollX = Math.round(camera.scrollX);
-      camera.scrollY = Math.round(camera.scrollY);
+      // Calculate new scroll to keep same center point visible
+      // Viewport size changes with zoom, so recalculate
+      const viewportWidth = camera.width / zoom;
+      const viewportHeight = camera.height / zoom;
 
-      // Update baseScroll so update() loop doesn't reset it
-      this.baseScrollX = camera.scrollX;
-      this.baseScrollY = camera.scrollY;
+      this.baseScrollX = Math.round(centerX - viewportWidth / 2);
+      this.baseScrollY = Math.round(centerY - viewportHeight / 2);
+
+      camera.setScroll(this.baseScrollX, this.baseScrollY);
     }
     this.zoomLevel = zoom;
   }
@@ -1702,6 +1701,28 @@ export class MainScene extends Phaser.Scene {
 
   setShowStats(show: boolean): void {
     this.showStats = show;
+  }
+
+  // Center camera on the middle of the isometric map
+  centerCameraOnMap(): void {
+    if (!this.isReady) return;
+
+    const camera = this.cameras.main;
+
+    // Calculate center of the isometric map in world coordinates
+    // The visual center of an isometric map at grid (GRID_WIDTH/2, GRID_HEIGHT/2)
+    const centerPos = this.gridToScreen(GRID_WIDTH / 2, GRID_HEIGHT / 2);
+
+    // Calculate scroll position to center the map
+    // scrollX/Y is the top-left corner, so we offset by half the viewport size
+    const viewportWidth = camera.width / camera.zoom;
+    const viewportHeight = camera.height / camera.zoom;
+
+    this.baseScrollX = Math.round(centerPos.x - viewportWidth / 2);
+    this.baseScrollY = Math.round(centerPos.y - viewportHeight / 2);
+
+    // Apply immediately
+    camera.setScroll(this.baseScrollX, this.baseScrollY);
   }
 
   // ============================================

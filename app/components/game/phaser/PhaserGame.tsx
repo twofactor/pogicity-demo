@@ -25,10 +25,13 @@ export interface PhaserGameHandle {
   clearCars: () => void;
   shakeScreen: (axis?: "x" | "y", intensity?: number, duration?: number) => void;
   zoomAtPoint: (zoom: number, screenX: number, screenY: number) => void;
+  markTilesDirty: (tiles: Array<{ x: number; y: number }>) => void;
+  centerCameraOnMap: () => void;
 }
 
 interface PhaserGameProps {
   grid: GridCell[][];
+  gridVersion: number; // Increments when grid is mutated, triggers update
   selectedTool: ToolType;
   selectedBuildingId: string | null;
   buildingOrientation: Direction;
@@ -47,6 +50,7 @@ const PhaserGame = forwardRef<PhaserGameHandle, PhaserGameProps>(
   function PhaserGame(
     {
       grid,
+      gridVersion,
       selectedTool,
       selectedBuildingId,
       buildingOrientation,
@@ -134,6 +138,16 @@ const PhaserGame = forwardRef<PhaserGameHandle, PhaserGameProps>(
             sceneRef.current.zoomAtPoint(zoom, screenX, screenY);
           }
         },
+        markTilesDirty: (tiles: Array<{ x: number; y: number }>) => {
+          if (sceneRef.current) {
+            sceneRef.current.markTilesDirty(tiles);
+          }
+        },
+        centerCameraOnMap: () => {
+          if (sceneRef.current) {
+            sceneRef.current.centerCameraOnMap();
+          }
+        },
       }),
       []
     );
@@ -175,11 +189,12 @@ const PhaserGame = forwardRef<PhaserGameHandle, PhaserGameProps>(
     }, []); // Only run once on mount
 
     // Update grid when it changes (differential update in scene)
+    // gridVersion triggers this effect when grid is mutated in place
     useEffect(() => {
       if (sceneRef.current && grid.length > 0) {
         sceneRef.current.updateGrid(grid);
       }
-    }, [grid]);
+    }, [grid, gridVersion]);
 
     // Update selected tool
     useEffect(() => {

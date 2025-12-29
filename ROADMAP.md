@@ -915,6 +915,68 @@ Layer offsets:
 - Simulation tick rate separate from render rate
 - Web workers for heavy simulation calculations
 
+### Grid Scaling Optimization (CRITICAL for larger maps)
+
+**Current Problem:**
+At 128×128 (16K tiles), placement has ~700ms input delay. The bottleneck is NOT rendering - it's the immutable grid copy:
+
+```typescript
+// CURRENT: Copies ALL 16,384 cells on every single placement
+setGrid((prevGrid) => {
+  const newGrid = prevGrid.map((row) => row.map((cell) => ({ ...cell })));
+  newGrid[y][x] = newCell;  // Change 1 tile
+  return newGrid;           // But copied 16,384
+});
+```
+
+**Measured Performance (128×128 grid):**
+```
+INP: 744ms (poor, should be <200ms)
+├─ Input delay:        703ms  ← THE PROBLEM (grid copy)
+├─ Processing:         0ms    ← Fine
+└─ Presentation delay: 41ms   ← Fine
+```
+
+**The Fix: Dirty Tile Tracking**
+
+```typescript
+// NEW: Mutate in place, track what changed
+const gridRef = useRef<GridCell[][]>(createEmptyGrid());
+const [dirtyTiles, setDirtyTiles] = useState<Set<string>>(new Set());
+
+function updateTile(x: number, y: number, newCell: GridCell) {
+  // Direct mutation (O(1) instead of O(n²))
+  gridRef.current[y][x] = newCell;
+
+  // Track dirty tile for Phaser re-render
+  setDirtyTiles(prev => new Set(prev).add(`${x},${y}`));
+}
+
+// Phaser only updates dirty tiles
+useEffect(() => {
+  if (dirtyTiles.size > 0) {
+    phaserRef.current?.updateDirtyTiles(dirtyTiles, gridRef.current);
+    setDirtyTiles(new Set());
+  }
+}, [dirtyTiles]);
+```
+
+**Expected Results:**
+| Grid Size | Current | After Fix |
+|-----------|---------|-----------|
+| 128×128 | 700ms | <50ms |
+| 256×256 | ~2800ms | <50ms |
+| 512×512 | ~11s | <50ms |
+
+**Implementation Steps:**
+1. Change grid from `useState` to `useRef` (no copy on mutation)
+2. Add `dirtyTiles` state to track changed cells
+3. Update `setGrid` calls to use direct mutation + dirty tracking
+4. Update Phaser's `updateGrid()` to only re-render dirty tiles
+5. For save/load, serialize `gridRef.current` directly
+
+**Priority:** HIGH - This unlocks SC4-sized maps (512×512 = 128×128 lots)
+
 ### Data Structures
 ```typescript
 // Lot definition
