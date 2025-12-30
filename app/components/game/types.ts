@@ -81,9 +81,9 @@ export const GRID_HEIGHT = 48;
 
 export const CAR_SPEED = 0.05;
 
-// Isometric tile dimensions (44x22 isometric diamond)
-export const TILE_WIDTH = 44;
-export const TILE_HEIGHT = 22;
+// Isometric tile dimensions (64x32 isometric diamond)
+export const TILE_WIDTH = 64;
+export const TILE_HEIGHT = 32;
 
 // Tile sizes for different types (in grid cells) - this is the FOOTPRINT
 export const TILE_SIZES: Record<TileType, { w: number; h: number }> = {

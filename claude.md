@@ -55,7 +55,7 @@ npm run lint    # ESLint
 - Phaser → React: via callbacks (`onTileClick`, `onTilesDrag`)
 
 **Isometric System:**
-- Tile size: 44x22 pixels
+- Tile size: 64x32 pixels
 - Roads snap to 4x4 grid segments
 - Depth sorting: `depth = (x + y) * DEPTH_Y_MULT`
 

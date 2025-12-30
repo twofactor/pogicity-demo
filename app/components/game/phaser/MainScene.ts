@@ -1449,16 +1449,13 @@ export class MainScene extends Phaser.Scene {
 
     // Update or create sprite
     let tileSprite = this.tileSprites.get(key);
-    // Snow tiles are 88x44 (2x size), others are 44x22 - calculate scale accordingly
-    const scale = textureKey.startsWith("snow_") ? 0.5 * 1.02 : 1.02;
+    // Native resolution - no scaling (assets should be 64x32)
 
     if (tileSprite) {
       tileSprite.setTexture(textureKey);
-      tileSprite.setScale(scale);
     } else {
       tileSprite = this.add.image(screenPos.x, screenPos.y, textureKey);
       tileSprite.setOrigin(0.5, 0);
-      tileSprite.setScale(scale);
       tileSprite.setDepth(this.depthFromSortPoint(screenPos.x, screenPos.y, 0));
       this.tileSprites.set(key, tileSprite);
     }
@@ -1820,8 +1817,7 @@ export class MainScene extends Phaser.Scene {
 
         const tileSprite = this.add.image(screenPos.x, screenPos.y, textureKey);
         tileSprite.setOrigin(0.5, 0);
-        // Snow tiles are 88x44 (2x size), others are 44x22
-        tileSprite.setScale(textureKey.startsWith("snow_") ? 0.5 * 1.02 : 1.02);
+        // Native resolution - no scaling (assets should be 64x32)
         tileSprite.setDepth(
           this.depthFromSortPoint(screenPos.x, screenPos.y, 0)
         );
@@ -1987,7 +1983,7 @@ export class MainScene extends Phaser.Scene {
     // corresponds to one "diagonal" of tiles and gets its own depth value.
     //
     // Building sprites are 512x512 with the front corner at (256, 512).
-    // Tiles are 44px wide in screen space, so each diagonal is 22px offset.
+    // Tiles are 64px wide in screen space, so each diagonal is 32px offset.
     //
     // For a 4x4 building (width=4, height=4), we create 8 slices:
     //   - 4 LEFT slices (for width): tiles going WEST from front corner
@@ -2011,7 +2007,7 @@ export class MainScene extends Phaser.Scene {
     // This allows characters to correctly interleave with building parts.
     // ========================================================================
 
-    const SLICE_WIDTH = 22; // Half tile width - isometric diagonal offset
+    const SLICE_WIDTH = 32; // Half tile width - isometric diagonal offset (64/2)
     const SPRITE_CENTER = 256; // Front corner X in sprite space
     const SPRITE_HEIGHT = 512;
 
@@ -2503,7 +2499,7 @@ export class MainScene extends Phaser.Scene {
             getSnowTextureKey(tx, ty)
           );
           preview.setOrigin(0.5, 0);
-          preview.setScale(0.5); // Snow tiles are 88x44, need to halve
+          // Native resolution - no scaling (assets should be 64x32)
           preview.setAlpha(hasCollision ? 0.3 : 0.7);
           if (hasCollision) preview.setTint(0xff0000);
           preview.setDepth(
@@ -2793,8 +2789,7 @@ export class MainScene extends Phaser.Scene {
                 textureKey
               );
               preview.setOrigin(0.5, 0);
-              // Snow tiles are 88x44, need to halve
-              if (textureKey.startsWith("snow_")) preview.setScale(0.5);
+              // Native resolution - no scaling (assets should be 64x32)
               preview.setAlpha(0.7);
               preview.setTint(0xff0000);
               preview.setDepth(
