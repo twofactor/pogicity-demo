@@ -38,6 +38,7 @@ import {
   BuildingDefinition,
 } from "@/app/data/buildings";
 import { loadGifAsAnimation, playGifAnimation } from "./GifLoader";
+import { TrafficManager } from "./TrafficManager";
 
 // Event types for React communication
 export interface SceneEvents {
@@ -96,6 +97,7 @@ export class MainScene extends Phaser.Scene {
   // Game state (owned by Phaser, not React)
   private grid: GridCell[][] = [];
   private characters: Character[] = [];
+  private trafficManager: TrafficManager = new TrafficManager();
 
   // Tool state (synced from React)
   private selectedTool: ToolType = ToolType.RoadLane;
@@ -455,6 +457,7 @@ export class MainScene extends Phaser.Scene {
 
     // Update game entities
     this.updateCharacters();
+    this.trafficManager.update();
 
     // Center camera on first frame (camera dimensions now known)
     if (this.needsCameraCenter) {
@@ -467,6 +470,7 @@ export class MainScene extends Phaser.Scene {
 
     // Render updated entities
     this.renderCharacters();
+    this.renderCars();
 
     // Handle dirty grid updates
     if (this.gridDirty) {
@@ -482,11 +486,12 @@ export class MainScene extends Phaser.Scene {
   private updateStatsDisplay(): void {
     const fps = Math.round(this.game.loop.actualFps);
     const charCount = this.characters.length;
+    const carCount = this.trafficManager.getCarCount();
 
     // Log every 60 frames (~1 second)
     this.statsLogCounter++;
     if (this.statsLogCounter >= 60) {
-      console.log(`[Stats] FPS: ${fps} | Characters: ${charCount}`);
+      console.log(`[Stats] FPS: ${fps} | Characters: ${charCount} | Cars: ${carCount}`);
       this.statsLogCounter = 0;
     }
 
@@ -510,6 +515,7 @@ export class MainScene extends Phaser.Scene {
       [
         `FPS: ${fps}`,
         `Characters: ${charCount}`,
+        `Cars: ${carCount}`,
         `Phaser-managed ✓`,
       ].join("\n")
     );
@@ -1094,6 +1100,7 @@ export class MainScene extends Phaser.Scene {
   updateGrid(newGrid: GridCell[][]): void {
     // Update grid reference (React now tells us what changed via markTilesDirty)
     this.grid = newGrid;
+    this.trafficManager.setGrid(newGrid);
 
     if (this.gridDirtyTiles.size > 0) {
       this.gridDirty = true;
@@ -1243,20 +1250,22 @@ export class MainScene extends Phaser.Scene {
     return true;
   }
 
-  // Car methods (stubbed out - traffic system removed for now)
+  // Car methods
   spawnCar(): boolean {
-    return false;
+    return this.trafficManager.spawnCar();
   }
 
   setDrivingState(_isDriving: boolean): void {
-    // No-op
+    // TODO: implement player driving mode
   }
 
   getPlayerCar(): Car | null {
+    // TODO: implement player car
     return null;
   }
 
   isPlayerDrivingMode(): boolean {
+    // TODO: implement player driving mode
     return false;
   }
 
@@ -1265,7 +1274,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   getCarCount(): number {
-    return 0;
+    return this.trafficManager.getCarCount();
   }
 
   clearCharacters(): void {
@@ -1275,6 +1284,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   clearCars(): void {
+    this.trafficManager.clearCars();
     this.carSprites.forEach((sprite) => sprite.destroy());
     this.carSprites.clear();
   }
@@ -2061,9 +2071,38 @@ export class MainScene extends Phaser.Scene {
     return `${building.id}_${firstDir}`;
   }
 
-  // Car rendering (stubbed out - traffic system removed for now)
+  // Car rendering
   private renderCars(): void {
-    // No-op - traffic system removed
+    const cars = this.trafficManager.getCars();
+    const currentCarIds = new Set(cars.map((c) => c.id));
+
+    // Remove sprites for cars that no longer exist
+    this.carSprites.forEach((sprite, id) => {
+      if (!currentCarIds.has(id)) {
+        sprite.destroy();
+        this.carSprites.delete(id);
+      }
+    });
+
+    // Update or create car sprites
+    for (const car of cars) {
+      // Use gridToScreen for proper alignment with tilemap
+      const screenPos = this.gridToScreen(car.x, car.y);
+      // Add offset to align cars with road center visually
+      const groundY = screenPos.y + SUBTILE_HEIGHT;
+      const textureKey = this.getCarTextureKey(car.carType, car.direction);
+
+      let sprite = this.carSprites.get(car.id);
+      if (!sprite) {
+        sprite = this.add.sprite(screenPos.x, groundY, textureKey);
+        sprite.setOrigin(0.5, 1);
+        this.carSprites.set(car.id, sprite);
+      } else {
+        sprite.setPosition(screenPos.x, groundY);
+        sprite.setTexture(textureKey);
+      }
+      sprite.setDepth(this.depthFromSortPoint(screenPos.x, groundY, 0.1));
+    }
   }
 
   private getCarTextureKey(carType: CarType, direction: Direction): string {
@@ -2086,8 +2125,8 @@ export class MainScene extends Phaser.Scene {
     });
 
     for (const char of this.characters) {
-      // Use smooth formula for characters - clean isometric movement
-      const screenPos = this.gridToScreenSmooth(char.x, char.y);
+      // Use gridToScreen for proper alignment with tilemap
+      const screenPos = this.gridToScreen(char.x, char.y);
       const centerY = screenPos.y + SUBTILE_HEIGHT / 2;
       const textureKey = this.getCharacterTextureKey(
         char.characterType,

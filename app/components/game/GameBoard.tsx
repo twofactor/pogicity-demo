@@ -600,8 +600,7 @@ export default function GameBoard() {
             if (originX !== undefined && originY !== undefined) {
               // Road lane deletion (2x2) - handles both RoadLane and RoadTurn
               const isRoadTile =
-                hasRoadLane(grid, originX, originY) &&
-                (cellType === TileType.RoadLane || cellType === TileType.RoadTurn);
+                cellType === TileType.RoadLane || cellType === TileType.RoadTurn;
 
               if (isRoadTile) {
                 // Delete the 2x2 road lane
@@ -839,8 +838,8 @@ export default function GameBoard() {
 
         const cellType = cell.type;
 
-        if (cellType === TileType.RoadLane) {
-          // Delete road lane (2x2)
+        if (cellType === TileType.RoadLane || cellType === TileType.RoadTurn) {
+          // Delete road lane/turn (2x2)
           for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
             for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
               const px = originX + dx;
@@ -932,7 +931,7 @@ export default function GameBoard() {
           itemsToDelete.add(
             `building:${originKey}:${building?.name || "Building"}`
           );
-        } else if (cell.type === TileType.RoadLane) {
+        } else if (cell.type === TileType.RoadLane || cell.type === TileType.RoadTurn) {
           itemsToDelete.add(`roadlane:${originKey}`);
         } else {
           itemsToDelete.add(`tile:${x},${y}`);
