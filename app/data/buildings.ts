@@ -221,14 +221,13 @@ export const BUILDINGS: Record<string, BuildingDefinition> = {
     },
     icon: "🏠",
     supportsRotation: true,
-    // Front porch tiles that allow props (flower bushes, etc.)
-    // Porch is on front-LEFT of building, one row back from edge
-    propSlotsByOrientation: {
-      south: [{ x: 0, y: 3 }, { x: 1, y: 3 }],
-      north: [{ x: 2, y: 1 }, { x: 3, y: 1 }],
-      east: [{ x: 3, y: 0 }, { x: 3, y: 1 }],
-      west: [{ x: 1, y: 2 }, { x: 1, y: 3 }],
-    },
+    // DISABLED - testing depth sorting
+    // propSlotsByOrientation: {
+    //   south: [{ x: 0, y: 3 }, { x: 1, y: 3 }],
+    //   north: [{ x: 2, y: 1 }, { x: 3, y: 1 }],
+    //   east: [{ x: 3, y: 0 }, { x: 3, y: 1 }],
+    //   west: [{ x: 1, y: 2 }, { x: 1, y: 3 }],
+    // },
   },
 
   // ===== COMMERCIAL (template) =====

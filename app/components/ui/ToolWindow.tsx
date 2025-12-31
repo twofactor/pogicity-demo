@@ -367,6 +367,36 @@ export default function ToolWindow({
               </button>
               <button
                 onClick={() => {
+                  onToolSelect(ToolType.TwoWayRoad);
+                  playClickSound();
+                }}
+                className={`rct-button ${
+                  selectedTool === ToolType.TwoWayRoad ? "active" : ""
+                }`}
+                title="2-Way Road (drag to place)"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 8,
+                  minHeight: 60,
+                }}
+              >
+                <img
+                  src="/Tiles/1x1asphalt.png"
+                  alt="2-Way Road"
+                  style={{
+                    width: 40,
+                    height: 40,
+                    objectFit: "contain",
+                    imageRendering: "pixelated",
+                  }}
+                />
+                <span style={{ fontSize: 11, marginTop: 4 }}>2-Way</span>
+              </button>
+              <button
+                onClick={() => {
                   onToolSelect(ToolType.Asphalt);
                   playClickSound();
                 }}

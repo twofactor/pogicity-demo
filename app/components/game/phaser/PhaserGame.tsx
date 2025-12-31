@@ -45,6 +45,7 @@ interface PhaserGameProps {
   onTilesDrag?: (tiles: Array<{ x: number; y: number }>) => void;
   onEraserDrag?: (tiles: Array<{ x: number; y: number }>) => void;
   onRoadLaneDrag?: (lanes: Array<{ x: number; y: number }>, direction: Direction, tileType: TileType) => void;
+  onTwoWayRoadDrag?: (lanes: Array<{ x: number; y: number }>, orientation: "horizontal" | "vertical") => void;
   onZoomChange?: (zoom: number) => void;
   showPaths?: boolean;
   showStats?: boolean;
@@ -64,6 +65,7 @@ const PhaserGame = forwardRef<PhaserGameHandle, PhaserGameProps>(
       onTilesDrag,
       onEraserDrag,
       onRoadLaneDrag,
+      onTwoWayRoadDrag,
       onZoomChange,
       showPaths = false,
       showStats = true,
@@ -180,6 +182,7 @@ const PhaserGame = forwardRef<PhaserGameHandle, PhaserGameProps>(
           onTilesDrag: (tiles) => onTilesDrag?.(tiles),
           onEraserDrag: (tiles) => onEraserDrag?.(tiles),
           onRoadLaneDrag: (lanes, direction, tileType) => onRoadLaneDrag?.(lanes, direction, tileType),
+          onTwoWayRoadDrag: (lanes, orientation) => onTwoWayRoadDrag?.(lanes, orientation),
         };
         scene.setEventCallbacks(events);
 
@@ -260,10 +263,11 @@ const PhaserGame = forwardRef<PhaserGameHandle, PhaserGameProps>(
           onTilesDrag: (tiles) => onTilesDrag?.(tiles),
           onEraserDrag: (tiles) => onEraserDrag?.(tiles),
           onRoadLaneDrag: (lanes, direction, tileType) => onRoadLaneDrag?.(lanes, direction, tileType),
+          onTwoWayRoadDrag: (lanes, orientation) => onTwoWayRoadDrag?.(lanes, orientation),
         };
         sceneRef.current.setEventCallbacks(events);
       }
-    }, [onTileClick, onTileHover, onTilesDrag, onEraserDrag, onRoadLaneDrag]);
+    }, [onTileClick, onTileHover, onTilesDrag, onEraserDrag, onRoadLaneDrag, onTwoWayRoadDrag]);
 
     return (
       <div

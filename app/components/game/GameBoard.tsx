@@ -598,23 +598,32 @@ export default function GameBoard() {
             const shouldPlaySound = cellType !== TileType.Grass;
 
             if (originX !== undefined && originY !== undefined) {
-              // Road lane deletion (2x2) - handles both RoadLane and RoadTurn
+              // Road lane deletion - handles both RoadLane and RoadTurn
               const isRoadTile =
                 cellType === TileType.RoadLane || cellType === TileType.RoadTurn;
 
               if (isRoadTile) {
-                // Delete the 2x2 road lane
-                for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
-                  for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
-                    const px = originX + dx;
-                    const py = originY + dy;
+                // Delete the entire road lot (finds all cells with same origin)
+                // Road lots can be 2x4 or 4x2 for 2-way roads, so scan 4x4 area
+                const lotOriginX: number = originX;
+                const lotOriginY: number = originY;
+                const ROAD_LOT_MAX = ROAD_LANE_SIZE * 2; // 4 subtiles max
+                for (let dy = 0; dy < ROAD_LOT_MAX; dy++) {
+                  for (let dx = 0; dx < ROAD_LOT_MAX; dx++) {
+                    const px = lotOriginX + dx;
+                    const py = lotOriginY + dy;
                     if (px < GRID_WIDTH && py < GRID_HEIGHT) {
-                      grid[py][px].type = TileType.Grass;
-                      grid[py][px].isOrigin = true;
-                      grid[py][px].originX = undefined;
-                      grid[py][px].originY = undefined;
-                      grid[py][px].laneDirection = undefined;
-                      dirtyTiles.push({ x: px, y: py });
+                      const checkCell = grid[py][px];
+                      // Only delete if this cell points to the same origin
+                      if (checkCell.originX === lotOriginX && checkCell.originY === lotOriginY &&
+                          (checkCell.type === TileType.RoadLane || checkCell.type === TileType.RoadTurn)) {
+                        grid[py][px].type = TileType.Grass;
+                        grid[py][px].isOrigin = true;
+                        grid[py][px].originX = undefined;
+                        grid[py][px].originY = undefined;
+                        grid[py][px].laneDirection = undefined;
+                        dirtyTiles.push({ x: px, y: py });
+                      }
                     }
                   }
                 }
@@ -816,6 +825,106 @@ export default function GameBoard() {
     []
   );
 
+  // Handle 2-way road placement (two parallel lanes with opposite directions)
+  const handleTwoWayRoadDrag = useCallback(
+    (lanes: Array<{ x: number; y: number }>, orientation: "horizontal" | "vertical") => {
+      if (lanes.length === 0) return;
+
+      const grid = gridRef.current;
+      const dirtyTiles: Array<{ x: number; y: number }> = [];
+
+      // Group lanes into pairs (road lots)
+      // Horizontal: lanes share same X, differ by ROAD_LANE_SIZE in Y
+      // Vertical: lanes share same Y, differ by ROAD_LANE_SIZE in X
+      const laneSet = new Set(lanes.map(l => `${l.x},${l.y}`));
+      const processedLanes = new Set<string>();
+
+      for (const { x: laneX, y: laneY } of lanes) {
+        const key = `${laneX},${laneY}`;
+        if (processedLanes.has(key)) continue;
+
+        // Find the paired lane for this 2-way road lot
+        let pairedLaneX = laneX;
+        let pairedLaneY = laneY;
+        if (orientation === "horizontal") {
+          // Paired lane is below (same X, Y + ROAD_LANE_SIZE)
+          pairedLaneY = laneY + ROAD_LANE_SIZE;
+        } else {
+          // Paired lane is to the right (X + ROAD_LANE_SIZE, same Y)
+          pairedLaneX = laneX + ROAD_LANE_SIZE;
+        }
+        const pairedKey = `${pairedLaneX},${pairedLaneY}`;
+
+        // Skip if we already processed this pair from the other lane
+        if (processedLanes.has(pairedKey)) continue;
+
+        // Both lanes must be valid for placement
+        const check1 = canPlaceRoadLane(grid, laneX, laneY);
+        const check2 = canPlaceRoadLane(grid, pairedLaneX, pairedLaneY);
+        if (!check1.valid || !check2.valid) continue;
+
+        // Mark both as processed
+        processedLanes.add(key);
+        processedLanes.add(pairedKey);
+
+        // Road lot origin is the top-left of the entire 2-way road
+        const lotOriginX = laneX;
+        const lotOriginY = laneY;
+
+        // Determine directions for each lane
+        let lane1Dir: Direction, lane2Dir: Direction;
+        if (orientation === "horizontal") {
+          // Horizontal: top lane goes Right, bottom goes Left
+          lane1Dir = Direction.Right;
+          lane2Dir = Direction.Left;
+        } else {
+          // Vertical: left lane goes Down, right goes Up
+          lane1Dir = Direction.Down;
+          lane2Dir = Direction.Up;
+        }
+
+        // Place first lane (top or left)
+        for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
+          for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
+            const px = laneX + dx;
+            const py = laneY + dy;
+            if (px < GRID_WIDTH && py < GRID_HEIGHT) {
+              grid[py][px].type = TileType.RoadLane;
+              grid[py][px].isOrigin = dx === 0 && dy === 0;
+              grid[py][px].originX = lotOriginX;
+              grid[py][px].originY = lotOriginY;
+              grid[py][px].laneDirection = lane1Dir;
+              dirtyTiles.push({ x: px, y: py });
+            }
+          }
+        }
+
+        // Place second lane (bottom or right) - points to same lot origin
+        for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
+          for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
+            const px = pairedLaneX + dx;
+            const py = pairedLaneY + dy;
+            if (px < GRID_WIDTH && py < GRID_HEIGHT) {
+              grid[py][px].type = TileType.RoadLane;
+              grid[py][px].isOrigin = false; // Only lot origin is true
+              grid[py][px].originX = lotOriginX;
+              grid[py][px].originY = lotOriginY;
+              grid[py][px].laneDirection = lane2Dir;
+              dirtyTiles.push({ x: px, y: py });
+            }
+          }
+        }
+      }
+
+      if (dirtyTiles.length > 0) {
+        phaserGameRef.current?.markTilesDirty(dirtyTiles);
+        playBuildRoadSound();
+        forceGridUpdate();
+      }
+    },
+    []
+  );
+
   // Perform the actual deletion of tiles
   const performDeletion = useCallback(
     (tiles: Array<{ x: number; y: number }>) => {
@@ -839,18 +948,25 @@ export default function GameBoard() {
         const cellType = cell.type;
 
         if (cellType === TileType.RoadLane || cellType === TileType.RoadTurn) {
-          // Delete road lane/turn (2x2)
-          for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
-            for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
+          // Delete road lot - find all cells pointing to this origin
+          // Road lots can be 2x4 (horizontal) or 4x2 (vertical), so scan 4x4 area
+          const ROAD_LOT_MAX = ROAD_LANE_SIZE * 2; // 4 subtiles max
+          for (let dy = 0; dy < ROAD_LOT_MAX; dy++) {
+            for (let dx = 0; dx < ROAD_LOT_MAX; dx++) {
               const px = originX + dx;
               const py = originY + dy;
               if (px < GRID_WIDTH && py < GRID_HEIGHT) {
-                grid[py][px].type = TileType.Grass;
-                grid[py][px].isOrigin = true;
-                grid[py][px].originX = undefined;
-                grid[py][px].originY = undefined;
-                grid[py][px].laneDirection = undefined;
-                dirtyTiles.push({ x: px, y: py });
+                const checkCell = grid[py][px];
+                // Only delete if this cell points to the same origin
+                if (checkCell.originX === originX && checkCell.originY === originY &&
+                    (checkCell.type === TileType.RoadLane || checkCell.type === TileType.RoadTurn)) {
+                  grid[py][px].type = TileType.Grass;
+                  grid[py][px].isOrigin = true;
+                  grid[py][px].originX = undefined;
+                  grid[py][px].originY = undefined;
+                  grid[py][px].laneDirection = undefined;
+                  dirtyTiles.push({ x: px, y: py });
+                }
               }
             }
           }
@@ -978,11 +1094,9 @@ export default function GameBoard() {
     if (phaserGameRef.current) {
       const success = phaserGameRef.current.spawnCar();
       if (!success) {
-        setModalState({
-          isVisible: true,
-          title: "Cannot Spawn Car",
-          message: "Please place some road lanes first!",
-        });
+        // Silently fail - could be no roads or spawn point occupied
+        // User can just click again
+        console.log("[Spawn Car] Could not spawn - no roads or spawn blocked");
       }
     }
   }, []);
@@ -1704,6 +1818,7 @@ export default function GameBoard() {
             onTilesDrag={handleTilesDrag}
             onEraserDrag={handleEraserDrag}
             onRoadLaneDrag={handleRoadLaneDrag}
+            onTwoWayRoadDrag={handleTwoWayRoadDrag}
             onZoomChange={handleZoomChange}
             showPaths={debugPaths}
             showStats={showStats}

@@ -47,6 +47,7 @@ export interface SceneEvents {
   onTilesDrag?: (tiles: Array<{ x: number; y: number }>) => void;
   onEraserDrag?: (tiles: Array<{ x: number; y: number }>) => void;
   onRoadLaneDrag?: (lanes: Array<{ x: number; y: number }>, direction: Direction, tileType: TileType) => void;
+  onTwoWayRoadDrag?: (lanes: Array<{ x: number; y: number }>, orientation: "horizontal" | "vertical") => void;
 }
 
 // Generate unique ID
@@ -892,6 +893,63 @@ export class MainScene extends Phaser.Scene {
           this.updatePreview();
         }
 
+        // If dragging with 2-way road tool, add TWO parallel lanes (opposite directions)
+        if (
+          this.isDragging &&
+          this.selectedTool === ToolType.TwoWayRoad &&
+          this.dragStartTile
+        ) {
+          // Determine direction on first movement
+          if (this.dragDirection === null) {
+            const dx = Math.abs(tileX - this.dragStartTile.x);
+            const dy = Math.abs(tileY - this.dragStartTile.y);
+            if (dx > dy) {
+              this.dragDirection = "horizontal";
+            } else if (dy > dx) {
+              this.dragDirection = "vertical";
+            } else {
+              return;
+            }
+          }
+
+          // Clear and rebuild drag tiles
+          this.dragTiles.clear();
+
+          if (this.dragDirection === "horizontal") {
+            // E-W road: two parallel horizontal lanes
+            const startX = Math.min(this.dragStartTile.x, tileX);
+            const endX = Math.max(this.dragStartTile.x, tileX);
+            const baseLane = getRoadLaneOrigin(startX, this.dragStartTile.y);
+            const endLane = getRoadLaneOrigin(endX, this.dragStartTile.y);
+
+            const startLaneX = Math.min(baseLane.x, endLane.x);
+            const endLaneX = Math.max(baseLane.x, endLane.x);
+
+            // Add lanes for both rows (lane 1 at y, lane 2 at y + ROAD_LANE_SIZE)
+            for (let laneX = startLaneX; laneX <= endLaneX; laneX += ROAD_LANE_SIZE) {
+              this.dragTiles.add(`${laneX},${baseLane.y}`);
+              this.dragTiles.add(`${laneX},${baseLane.y + ROAD_LANE_SIZE}`);
+            }
+          } else if (this.dragDirection === "vertical") {
+            // N-S road: two parallel vertical lanes
+            const startY = Math.min(this.dragStartTile.y, tileY);
+            const endY = Math.max(this.dragStartTile.y, tileY);
+            const baseLane = getRoadLaneOrigin(this.dragStartTile.x, startY);
+            const endLane = getRoadLaneOrigin(this.dragStartTile.x, endY);
+
+            const startLaneY = Math.min(baseLane.y, endLane.y);
+            const endLaneY = Math.max(baseLane.y, endLane.y);
+
+            // Add lanes for both columns (lane 1 at x, lane 2 at x + ROAD_LANE_SIZE)
+            for (let laneY = startLaneY; laneY <= endLaneY; laneY += ROAD_LANE_SIZE) {
+              this.dragTiles.add(`${baseLane.x},${laneY}`);
+              this.dragTiles.add(`${baseLane.x + ROAD_LANE_SIZE},${laneY}`);
+            }
+          }
+
+          this.updatePreview();
+        }
+
         this.updatePreview();
       }
     } else {
@@ -932,7 +990,8 @@ export class MainScene extends Phaser.Scene {
           this.selectedTool === ToolType.Eraser ||
           this.selectedTool === ToolType.Sidewalk ||
           this.selectedTool === ToolType.RoadLane ||
-          this.selectedTool === ToolType.RoadTurn
+          this.selectedTool === ToolType.RoadTurn ||
+          this.selectedTool === ToolType.TwoWayRoad
         ) {
           this.isDragging = true;
           this.dragTiles.clear();
@@ -941,7 +1000,8 @@ export class MainScene extends Phaser.Scene {
 
           if (
             this.selectedTool === ToolType.RoadLane ||
-            this.selectedTool === ToolType.RoadTurn
+            this.selectedTool === ToolType.RoadTurn ||
+            this.selectedTool === ToolType.TwoWayRoad
           ) {
             // For road lanes, add the initial lane origin (snapped to 2x2 grid)
             const laneOrigin = getRoadLaneOrigin(
@@ -949,6 +1009,11 @@ export class MainScene extends Phaser.Scene {
               this.hoverTile.y
             );
             this.dragTiles.add(`${laneOrigin.x},${laneOrigin.y}`);
+            // For 2-way roads, also add the parallel lane
+            if (this.selectedTool === ToolType.TwoWayRoad) {
+              this.dragTiles.add(`${laneOrigin.x + ROAD_LANE_SIZE},${laneOrigin.y}`);
+              this.dragTiles.add(`${laneOrigin.x},${laneOrigin.y + ROAD_LANE_SIZE}`);
+            }
           } else {
             // For other tools, add the tile directly
             this.dragTiles.add(`${this.hoverTile.x},${this.hoverTile.y}`);
@@ -992,6 +1057,12 @@ export class MainScene extends Phaser.Scene {
           // Map tool type to tile type
           const tileType = this.selectedTool === ToolType.RoadTurn ? TileType.RoadTurn : TileType.RoadLane;
           this.events_.onRoadLaneDrag(tiles, this.roadLaneDirection, tileType);
+        } else if (
+          this.selectedTool === ToolType.TwoWayRoad &&
+          this.events_.onTwoWayRoadDrag
+        ) {
+          // 2-way road drag - pass tiles and direction to assign opposite lane directions
+          this.events_.onTwoWayRoadDrag(tiles, this.dragDirection || "horizontal");
         } else if (this.events_.onTilesDrag) {
           // Snow/Tile place immediately
           this.events_.onTilesDrag(tiles);
@@ -1252,6 +1323,8 @@ export class MainScene extends Phaser.Scene {
 
   // Car methods
   spawnCar(): boolean {
+    // Ensure TrafficManager has latest grid before spawning
+    this.trafficManager.setGrid(this.grid);
     return this.trafficManager.spawnCar();
   }
 
@@ -1889,7 +1962,7 @@ export class MainScene extends Phaser.Scene {
     // This allows characters to correctly interleave with building parts.
     // ========================================================================
 
-    const SLICE_WIDTH = 32; // Half tile width - isometric diagonal offset (64/2)
+    const SLICE_WIDTH = SUBTILE_WIDTH / 2; // Half subtile width - isometric diagonal offset for subtile grid
     const SPRITE_CENTER = 256; // Front corner X in sprite space
     const SPRITE_HEIGHT = 512;
 
@@ -2320,6 +2393,66 @@ export class MainScene extends Phaser.Scene {
           );
         }
       }
+    } else if (this.selectedTool === ToolType.TwoWayRoad) {
+      // Get lanes to preview for 2-way road
+      const lanesToPreview: Array<{ x: number; y: number }> = [];
+      if (this.isDragging && this.dragTiles.size > 0) {
+        this.dragTiles.forEach((key) => {
+          const [laneX, laneY] = key.split(",").map(Number);
+          lanesToPreview.push({ x: laneX, y: laneY });
+        });
+      } else if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
+        // Single hover - just show the single lane origin (like RoadLane tool)
+        // Parallel lane only appears once dragging starts
+        const laneOrigin = getRoadLaneOrigin(x, y);
+        lanesToPreview.push({ x: laneOrigin.x, y: laneOrigin.y });
+      }
+
+      // Check if ANY lane in the road lot has a collision - whole preview turns red
+      const anyCollision = lanesToPreview.some(lane => !canPlaceRoadLane(this.grid, lane.x, lane.y).valid);
+
+      for (const lane of lanesToPreview) {
+        // Draw 2x2 asphalt tiles for this lane
+        for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
+          for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
+            const px = lane.x + dx;
+            const py = lane.y + dy;
+            if (px < GRID_WIDTH && py < GRID_HEIGHT) {
+              const screenPos = this.gridToScreen(px, py);
+              const preview = this.add.image(screenPos.x, screenPos.y, "asphalt");
+              preview.setOrigin(0.5, 0);
+              preview.setScale(SUBTILE_WIDTH / preview.width, SUBTILE_HEIGHT / preview.height);
+              preview.setAlpha(anyCollision ? 0.3 : 0.6);
+              if (anyCollision) preview.setTint(0xff0000);
+              preview.setDepth(this.depthFromSortPoint(screenPos.x, screenPos.y, 1_000_000));
+              this.previewSprites.push(preview);
+            }
+          }
+        }
+
+        // Draw direction arrow
+        const centerX = lane.x + ROAD_LANE_SIZE / 2;
+        const centerY = lane.y + ROAD_LANE_SIZE / 2;
+        const centerScreen = this.gridToScreen(centerX, centerY);
+
+        // Show bi-directional arrows for hover, actual direction during drag
+        if (this.isDragging && this.dragDirection) {
+          // Determine which lane this is based on drag direction
+          let arrowDir: Direction;
+          if (this.dragDirection === "horizontal") {
+            const hasLaneBelow = lanesToPreview.some(l => l.x === lane.x && l.y === lane.y + ROAD_LANE_SIZE);
+            arrowDir = hasLaneBelow ? Direction.Right : Direction.Left;
+          } else {
+            const hasLaneRight = lanesToPreview.some(l => l.y === lane.y && l.x === lane.x + ROAD_LANE_SIZE);
+            arrowDir = hasLaneRight ? Direction.Down : Direction.Up;
+          }
+          this.drawDirectionArrow(centerScreen.x, centerScreen.y, arrowDir, anyCollision ? 0xff0000 : 0x00ff00, anyCollision ? 0.5 : 0.9);
+        } else {
+          // Hover - show both directions
+          this.drawDirectionArrow(centerScreen.x, centerScreen.y, Direction.Right, anyCollision ? 0xff0000 : 0x00ff00, 0.5);
+          this.drawDirectionArrow(centerScreen.x, centerScreen.y, Direction.Left, anyCollision ? 0xff0000 : 0x00ff00, 0.5);
+        }
+      }
     } else if (this.selectedTool === ToolType.Tile) {
       // Get tiles to preview - either drag set or just hover tile
       const tilesToPreview: Array<{ x: number; y: number }> = [];
@@ -2617,16 +2750,16 @@ export class MainScene extends Phaser.Scene {
           const originY = cell.originY ?? ty;
           const cellType = cell.type;
 
-          // Check if this is a road lane
-          const isRoadLane =
-            originX % ROAD_LANE_SIZE === 0 &&
-            originY % ROAD_LANE_SIZE === 0 &&
-            cellType === TileType.RoadLane;
+          // Check if this is a road tile (lane or turn)
+          const isRoadTile =
+            cellType === TileType.RoadLane || cellType === TileType.RoadTurn;
 
-          if (isRoadLane) {
-            // Show entire road lane (2x2)
-            for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
-              for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
+          if (isRoadTile) {
+            // Show entire road lot - scan 4x4 area for all cells sharing same origin
+            // This handles both 1-way (2x2) and 2-way roads (4x2 or 2x4)
+            const ROAD_LOT_MAX = ROAD_LANE_SIZE * 2; // 4 subtiles max
+            for (let dy = 0; dy < ROAD_LOT_MAX; dy++) {
+              for (let dx = 0; dx < ROAD_LOT_MAX; dx++) {
                 const px = originX + dx;
                 const py = originY + dy;
                 if (
@@ -2634,9 +2767,13 @@ export class MainScene extends Phaser.Scene {
                   py < GRID_HEIGHT &&
                   !previewedTiles.has(`${px},${py}`)
                 ) {
-                  previewedTiles.add(`${px},${py}`);
                   const tileCell = this.grid[py]?.[px];
-                  if (tileCell && tileCell.type !== TileType.Grass) {
+                  // Only show if this cell points to the same origin
+                  if (tileCell &&
+                      tileCell.originX === originX &&
+                      tileCell.originY === originY &&
+                      (tileCell.type === TileType.RoadLane || tileCell.type === TileType.RoadTurn)) {
+                    previewedTiles.add(`${px},${py}`);
                     const screenPos = this.gridToScreen(px, py);
                     const preview = this.add.image(
                       screenPos.x,

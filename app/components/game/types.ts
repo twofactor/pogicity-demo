@@ -14,6 +14,7 @@ export enum ToolType {
   None = "none",
   RoadLane = "roadLane", // 2x2 lane placement with direction (1-way)
   RoadTurn = "roadTurn", // 2x2 lane: straight or right turn (rotate for all directions)
+  TwoWayRoad = "twoWayRoad", // 4-wide road with 2 parallel lanes (opposite directions)
   Asphalt = "asphalt", // Plain asphalt (decorative)
   Sidewalk = "sidewalk", // Pedestrian walkway
   Tile = "tile",
