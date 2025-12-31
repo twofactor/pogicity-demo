@@ -79,14 +79,27 @@ export interface Car {
   carType: CarType;
 }
 
-export const GRID_WIDTH = 128;
-export const GRID_HEIGHT = 128;
+// Grid hierarchy (SC4/RCT style):
+// - LOT: 8x8 subtiles (building placement unit)
+// - TILE: 2x2 subtiles (car-sized unit, 64x32 pixels)
+// - SUBTILE: 1x1 (finest unit, 32x16 pixels - characters, fine props)
+
+// Subtile dimensions (base unit for tilemap)
+export const SUBTILE_WIDTH = 32;
+export const SUBTILE_HEIGHT = 16;
+
+// Tile dimensions (2x2 subtiles, car-sized)
+export const TILE_WIDTH = 64;  // 2 * SUBTILE_WIDTH
+export const TILE_HEIGHT = 32; // 2 * SUBTILE_HEIGHT
+
+// Lot dimensions in subtiles (8x8 subtiles = 4x4 tiles)
+export const LOT_SIZE = 8;
+
+// Grid is measured in SUBTILES (finest unit)
+export const GRID_WIDTH = 192;  // 24 lots * 8 subtiles
+export const GRID_HEIGHT = 192;
 
 export const CAR_SPEED = 0.05;
-
-// Isometric tile dimensions (64x32 isometric diamond)
-export const TILE_WIDTH = 64;
-export const TILE_HEIGHT = 32;
 
 // Tile sizes for different types (in grid cells) - this is the FOOTPRINT
 export const TILE_SIZES: Record<TileType, { w: number; h: number }> = {
@@ -103,24 +116,72 @@ export const CHARACTER_PIXELS_PER_FRAME_X = 13 / 58;
 export const CHARACTER_PIXELS_PER_FRAME_Y = 5 / 58;
 export const CHARACTER_SPEED = 0.015;
 
-// Convert grid coordinates to isometric screen coordinates
+// Convert subtile grid coordinates to isometric screen coordinates
 export function gridToIso(
   gridX: number,
   gridY: number
 ): { x: number; y: number } {
   return {
-    x: (gridX - gridY) * (TILE_WIDTH / 2),
-    y: (gridX + gridY) * (TILE_HEIGHT / 2),
+    x: (gridX - gridY) * (SUBTILE_WIDTH / 2),
+    y: (gridX + gridY) * (SUBTILE_HEIGHT / 2),
   };
 }
 
-// Convert isometric screen coordinates back to grid coordinates
+// Convert isometric screen coordinates back to subtile grid coordinates
 export function isoToGrid(
   isoX: number,
   isoY: number
 ): { x: number; y: number } {
   return {
-    x: (isoX / (TILE_WIDTH / 2) + isoY / (TILE_HEIGHT / 2)) / 2,
-    y: (isoY / (TILE_HEIGHT / 2) - isoX / (TILE_WIDTH / 2)) / 2,
+    x: (isoX / (SUBTILE_WIDTH / 2) + isoY / (SUBTILE_HEIGHT / 2)) / 2,
+    y: (isoY / (SUBTILE_HEIGHT / 2) - isoX / (SUBTILE_WIDTH / 2)) / 2,
   };
+}
+
+// Tile indices for tilemap (must match tileset order)
+// Non-quadrant tiles: single index
+// Quadrant tiles: 4 consecutive indices (TL, TR, BL, BR)
+export enum TileIndex {
+  // Non-quadrant tiles (scaled, single tile)
+  Grass = 0,
+  Snow1 = 1,
+  Snow2 = 2,
+  Snow3 = 3,
+
+  // Quadrant tiles (native res, 4 tiles each) - ready for future assets
+  // Road: indices 4-7 (TL, TR, BL, BR)
+  RoadTL = 4,
+  RoadTR = 5,
+  RoadBL = 6,
+  RoadBR = 7,
+
+  // Asphalt: indices 8-11
+  AsphaltTL = 8,
+  AsphaltTR = 9,
+  AsphaltBL = 10,
+  AsphaltBR = 11,
+}
+
+// Which tile types use quadrant system (native res, position-based selection)
+export const QUADRANT_TILES: Record<string, boolean> = {
+  grass: false,    // Scaled for now
+  road: true,      // Quadrant-based
+  asphalt: true,   // Quadrant-based
+  snow: false,     // Scaled for now
+};
+
+// Get tile index, handling quadrant tiles based on position
+export function getTileIndexForType(
+  tileType: string,
+  baseIndex: TileIndex,
+  x: number,
+  y: number
+): number {
+  if (QUADRANT_TILES[tileType]) {
+    // Quadrant tile: pick TL/TR/BL/BR based on position
+    const quadrant = (y % 2) * 2 + (x % 2); // 0=TL, 1=TR, 2=BL, 3=BR
+    return baseIndex + quadrant;
+  }
+  // Non-quadrant: just return the base index
+  return baseIndex;
 }

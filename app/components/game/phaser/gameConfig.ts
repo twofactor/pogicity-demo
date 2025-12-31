@@ -1,15 +1,16 @@
 import Phaser from "phaser";
-import { GRID_WIDTH, GRID_HEIGHT, TILE_WIDTH, TILE_HEIGHT } from "../types";
+import { GRID_WIDTH, GRID_HEIGHT, SUBTILE_WIDTH, SUBTILE_HEIGHT } from "../types";
 
 // Calculate WORLD size for isometric grid (total game world, not canvas)
-const isoWidth = (GRID_WIDTH + GRID_HEIGHT) * (TILE_WIDTH / 2);
-const isoHeight = (GRID_WIDTH + GRID_HEIGHT) * (TILE_HEIGHT / 2);
+// Grid is measured in subtiles (32x16), so use subtile dimensions
+const isoWidth = (GRID_WIDTH + GRID_HEIGHT) * (SUBTILE_WIDTH / 2);
+const isoHeight = (GRID_WIDTH + GRID_HEIGHT) * (SUBTILE_HEIGHT / 2);
 
 // Add padding for buildings that extend above their footprint
 const WORLD_PADDING_TOP = 300;
 const WORLD_PADDING_BOTTOM = 100;
 
-export const WORLD_WIDTH = Math.ceil(isoWidth) + TILE_WIDTH * 4;
+export const WORLD_WIDTH = Math.ceil(isoWidth) + SUBTILE_WIDTH * 4;
 export const WORLD_HEIGHT =
   Math.ceil(isoHeight) + WORLD_PADDING_TOP + WORLD_PADDING_BOTTOM;
 

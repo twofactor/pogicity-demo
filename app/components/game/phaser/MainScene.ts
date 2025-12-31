@@ -9,8 +9,10 @@ import {
   CarType,
   GRID_WIDTH,
   GRID_HEIGHT,
-  TILE_WIDTH,
-  TILE_HEIGHT,
+  SUBTILE_WIDTH,
+  SUBTILE_HEIGHT,
+  TileIndex,
+  QUADRANT_TILES,
   ToolType,
   CHARACTER_SPEED,
   CAR_SPEED,
@@ -84,8 +86,13 @@ export class MainScene extends Phaser.Scene {
   // Depth scaling for stable painter's algorithm ordering
   private readonly DEPTH_Y_MULT = 10000;
 
-  // Sprite containers
-  private tileSprites: Map<string, Phaser.GameObjects.Image> = new Map();
+  // Tilemap for ground layer (32x16 subtiles, batched rendering)
+  private groundMap: Phaser.Tilemaps.Tilemap | null = null;
+  private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+  private tileData: number[][] = []; // 2D array of TileIndex values
+
+  // Sprite containers (buildings/entities on top of tilemap)
+  private tileSprites: Map<string, Phaser.GameObjects.Image> = new Map(); // Legacy, will remove
   private buildingSprites: Map<string, Phaser.GameObjects.Image> = new Map();
   private glowSprites: Map<string, Phaser.GameObjects.GameObject> = new Map();
   private carSprites: Map<string, Phaser.GameObjects.Sprite> = new Map();
@@ -185,7 +192,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   preload(): void {
-    // Load tile textures
+    // Load tile textures (will be combined into tileset in create())
+    // These are 64x32, we'll scale to 32x16 for the tilemap
     this.load.image("grass", "/Tiles/1x1grass.png");
     this.load.image("road", "/Tiles/1x1square_tile.png");
     this.load.image("asphalt", "/Tiles/1x1asphalt_tile.png");
@@ -259,8 +267,11 @@ export class MainScene extends Phaser.Scene {
       });
     }
 
-    // Initialize empty grid
+    // Initialize empty grid and tile data
     this.initializeGrid();
+
+    // Set up tilemap for ground rendering
+    this.setupTilemap();
 
     // Set world bounds for camera (world is larger than viewport)
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
@@ -277,7 +288,7 @@ export class MainScene extends Phaser.Scene {
     // Based on: https://phaser.io/examples/v3.85.0/tilemap/view/mouse-wheel-zoom
     this.input.on("wheel", this.handleWheel, this);
 
-    // Initial render
+    // Initial render (buildings only - ground is handled by tilemap)
     this.renderGrid();
 
     // Camera will be centered on first update frame (when dimensions are known)
@@ -300,6 +311,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private initializeGrid(): void {
+    // Initialize grid cell data
     this.grid = Array.from({ length: GRID_HEIGHT }, (_, y) =>
       Array.from({ length: GRID_WIDTH }, (_, x) => ({
         type: TileType.Grass,
@@ -308,6 +320,106 @@ export class MainScene extends Phaser.Scene {
         isOrigin: true,
       }))
     );
+
+    // Initialize tilemap data (all grass to start)
+    // Note: tileData is for reference, actual rendering uses groundLayer directly
+    this.tileData = Array.from({ length: GRID_HEIGHT }, () =>
+      Array.from({ length: GRID_WIDTH }, () => TileIndex.Grass)
+    );
+  }
+
+  // Generate tileset texture and create isometric tilemap
+  private setupTilemap(): void {
+    // Tileset layout (must match TileIndex enum):
+    // 0: Grass (scaled)
+    // 1-3: Snow1, Snow2, Snow3 (scaled)
+    // 4-7: Road quadrants (TL, TR, BL, BR) - scaled for now, ready for native assets
+    // 8-11: Asphalt quadrants (TL, TR, BL, BR) - scaled for now
+
+    const tilesetWidth = SUBTILE_WIDTH;
+    const tilesetHeight = SUBTILE_HEIGHT * 12; // 4 non-quadrant + 8 quadrant slots
+
+    const canvas = document.createElement("canvas");
+    canvas.width = tilesetWidth;
+    canvas.height = tilesetHeight;
+    const ctx = canvas.getContext("2d")!;
+
+    // Helper to draw a scaled tile at an index
+    const drawScaledTile = (textureKey: string, index: number) => {
+      const texture = this.textures.get(textureKey);
+      const source = texture.getSourceImage() as HTMLImageElement;
+      ctx.drawImage(
+        source,
+        0, 0, source.width, source.height,
+        0, index * SUBTILE_HEIGHT, SUBTILE_WIDTH, SUBTILE_HEIGHT
+      );
+    };
+
+    // Non-quadrant tiles (scaled)
+    drawScaledTile("grass", TileIndex.Grass);
+    drawScaledTile("snow_1", TileIndex.Snow1);
+    drawScaledTile("snow_2", TileIndex.Snow2);
+    drawScaledTile("snow_3", TileIndex.Snow3);
+
+    // Quadrant tiles - for now just scale the same image 4 times
+    // Later: load actual quadrant assets (road_tl.png, road_tr.png, etc.)
+    for (let q = 0; q < 4; q++) {
+      drawScaledTile("road", TileIndex.RoadTL + q);
+      drawScaledTile("asphalt", TileIndex.AsphaltTL + q);
+    }
+
+    // Add tileset texture to Phaser
+    this.textures.addCanvas("ground_tileset", canvas);
+
+    // Create a blank isometric tilemap
+    // We need to construct it with the proper config for isometric
+    const mapData = new Phaser.Tilemaps.MapData({
+      name: 'ground',
+      width: GRID_WIDTH,
+      height: GRID_HEIGHT,
+      tileWidth: SUBTILE_WIDTH,
+      tileHeight: SUBTILE_HEIGHT,
+      orientation: Phaser.Tilemaps.Orientation.ISOMETRIC,
+      format: Phaser.Tilemaps.Formats.ARRAY_2D,
+    });
+
+    this.groundMap = new Phaser.Tilemaps.Tilemap(this, mapData);
+
+    // Add tileset image to the map
+    const tileset = this.groundMap.addTilesetImage(
+      "ground_tileset",
+      "ground_tileset",
+      SUBTILE_WIDTH,
+      SUBTILE_HEIGHT,
+      0,
+      0
+    );
+
+    if (!tileset) {
+      console.error("Failed to create tileset");
+      return;
+    }
+
+    // Create a blank layer and fill it with our tile data
+    this.groundLayer = this.groundMap.createBlankLayer(
+      "ground",
+      tileset,
+      GRID_OFFSET_X,
+      GRID_OFFSET_Y,
+      GRID_WIDTH,
+      GRID_HEIGHT
+    );
+
+    if (this.groundLayer) {
+      this.groundLayer.setDepth(0); // Ground is always at the bottom
+
+      // Fill the layer with grass tiles initially
+      for (let y = 0; y < GRID_HEIGHT; y++) {
+        for (let x = 0; x < GRID_WIDTH; x++) {
+          this.groundLayer.putTileAt(TileIndex.Grass, x, y);
+        }
+      }
+    }
   }
 
   private async loadCharacterAnimations(): Promise<void> {
@@ -440,7 +552,7 @@ export class MainScene extends Phaser.Scene {
     if (this.isPlayerDriving && this.playerCar) {
       this.wasDriving = true;
       const screenPos = this.gridToScreen(this.playerCar.x, this.playerCar.y);
-      const groundY = screenPos.y + TILE_HEIGHT / 2;
+      const groundY = screenPos.y + SUBTILE_HEIGHT / 2;
       const viewportWidth = camera.width / camera.zoom;
       const viewportHeight = camera.height / camera.zoom;
       this.baseScrollX = screenPos.x - viewportWidth / 2;
@@ -1032,11 +1144,11 @@ export class MainScene extends Phaser.Scene {
   // PUBLIC METHODS (called from React)
   // ============================================
 
-  // Convert grid coordinates to isometric screen position
+  // Convert subtile grid coordinates to isometric screen position
   gridToScreen(gridX: number, gridY: number): { x: number; y: number } {
     return {
-      x: GRID_OFFSET_X + (gridX - gridY) * (TILE_WIDTH / 2),
-      y: GRID_OFFSET_Y + (gridX + gridY) * (TILE_HEIGHT / 2),
+      x: GRID_OFFSET_X + (gridX - gridY) * (SUBTILE_WIDTH / 2),
+      y: GRID_OFFSET_Y + (gridX + gridY) * (SUBTILE_HEIGHT / 2),
     };
   }
 
@@ -1045,8 +1157,8 @@ export class MainScene extends Phaser.Scene {
     const relY = screenY - GRID_OFFSET_Y;
 
     return {
-      x: (relX / (TILE_WIDTH / 2) + relY / (TILE_HEIGHT / 2)) / 2,
-      y: (relY / (TILE_HEIGHT / 2) - relX / (TILE_WIDTH / 2)) / 2,
+      x: (relX / (SUBTILE_WIDTH / 2) + relY / (SUBTILE_HEIGHT / 2)) / 2,
+      y: (relY / (SUBTILE_HEIGHT / 2) - relX / (SUBTILE_WIDTH / 2)) / 2,
     };
   }
 
@@ -1438,61 +1550,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   private updateTileSprite(x: number, y: number, cell: GridCell): void {
-    const key = `${x},${y}`;
-    const screenPos = this.gridToScreen(x, y);
-
-    // Determine texture
-    let textureKey = "grass";
-
-    if (cell.type === TileType.Road) {
-      textureKey = "road";
-    } else if (cell.type === TileType.Asphalt) {
-      textureKey = "asphalt";
-    } else if (cell.type === TileType.Tile) {
-      textureKey = "road";
-    } else if (cell.type === TileType.Snow) {
-      textureKey = getSnowTextureKey(x, y);
-    } else if (cell.type === TileType.Building) {
-      if (cell.buildingId) {
-        const building = getBuilding(cell.buildingId);
-        const preservesTile =
-          building && (building.category === "props" || building.isDecoration);
-        if (preservesTile && cell.underlyingTileType) {
-          if (
-            cell.underlyingTileType === TileType.Tile ||
-            cell.underlyingTileType === TileType.Road
-          ) {
-            textureKey = "road";
-          } else if (cell.underlyingTileType === TileType.Asphalt) {
-            textureKey = "asphalt";
-          } else if (cell.underlyingTileType === TileType.Snow) {
-            textureKey = getSnowTextureKey(x, y);
-          } else {
-            textureKey = "grass";
-          }
-        } else if (preservesTile) {
-          // No underlying tile stored, default to grass for decorations
-          textureKey = "grass";
-        } else {
-          textureKey = "road";
-        }
-      } else {
-        textureKey = "road";
-      }
-    }
-
-    // Update or create sprite
-    let tileSprite = this.tileSprites.get(key);
-    // Native resolution - no scaling (assets should be 64x32)
-
-    if (tileSprite) {
-      tileSprite.setTexture(textureKey);
-    } else {
-      tileSprite = this.add.image(screenPos.x, screenPos.y, textureKey);
-      tileSprite.setOrigin(0.5, 0);
-      tileSprite.setDepth(this.depthFromSortPoint(screenPos.x, screenPos.y, 0));
-      this.tileSprites.set(key, tileSprite);
-    }
+    // Use tilemap for ground tiles instead of individual sprites
+    this.updateTilemapTile(x, y);
   }
 
   // Spawn a character
@@ -1801,13 +1860,13 @@ export class MainScene extends Phaser.Scene {
           graphics.beginPath();
           graphics.moveTo(screenPos.x, screenPos.y);
           graphics.lineTo(
-            screenPos.x + TILE_WIDTH / 2,
-            screenPos.y + TILE_HEIGHT / 2
+            screenPos.x + SUBTILE_WIDTH / 2,
+            screenPos.y + SUBTILE_HEIGHT / 2
           );
-          graphics.lineTo(screenPos.x, screenPos.y + TILE_HEIGHT);
+          graphics.lineTo(screenPos.x, screenPos.y + SUBTILE_HEIGHT);
           graphics.lineTo(
-            screenPos.x - TILE_WIDTH / 2,
-            screenPos.y + TILE_HEIGHT / 2
+            screenPos.x - SUBTILE_WIDTH / 2,
+            screenPos.y + SUBTILE_HEIGHT / 2
           );
           graphics.closePath();
           graphics.fillPath();
@@ -1819,67 +1878,20 @@ export class MainScene extends Phaser.Scene {
   }
 
   private renderGrid(): void {
-    // Initial full render
-    this.tileSprites.forEach((sprite) => sprite.destroy());
-    this.tileSprites.clear();
+    // Ground tiles are now handled by the tilemap - only render buildings here
     this.buildingSprites.forEach((sprite) => sprite.destroy());
     this.buildingSprites.clear();
     this.glowSprites.forEach((sprite) => sprite.destroy());
     this.glowSprites.clear();
 
+    // Sync tilemap with grid data
+    this.syncTilemapWithGrid();
+
+    // Render buildings (sprites on top of tilemap)
     for (let y = 0; y < GRID_HEIGHT; y++) {
       for (let x = 0; x < GRID_WIDTH; x++) {
         const cell = this.grid[y]?.[x];
         if (!cell) continue;
-
-        const screenPos = this.gridToScreen(x, y);
-        const key = `${x},${y}`;
-
-        let textureKey = "grass";
-
-        if (cell.type === TileType.Road) {
-          textureKey = "road";
-        } else if (cell.type === TileType.Asphalt) {
-          textureKey = "asphalt";
-        } else if (cell.type === TileType.Tile) {
-          textureKey = "road";
-        } else if (cell.type === TileType.Snow) {
-          textureKey = getSnowTextureKey(x, y);
-        } else if (cell.type === TileType.Building) {
-          if (cell.buildingId) {
-            const building = getBuilding(cell.buildingId);
-            const preservesTile =
-              building &&
-              (building.category === "props" || building.isDecoration);
-            if (preservesTile && cell.underlyingTileType) {
-              if (cell.underlyingTileType === TileType.Tile) {
-                textureKey = "road";
-              } else if (cell.underlyingTileType === TileType.Road) {
-                textureKey = "road";
-              } else if (cell.underlyingTileType === TileType.Asphalt) {
-                textureKey = "asphalt";
-              } else if (cell.underlyingTileType === TileType.Snow) {
-                textureKey = getSnowTextureKey(x, y);
-              } else {
-                textureKey = "grass";
-              }
-            } else if (preservesTile) {
-              textureKey = "grass";
-            } else {
-              textureKey = "road";
-            }
-          } else {
-            textureKey = "road";
-          }
-        }
-
-        const tileSprite = this.add.image(screenPos.x, screenPos.y, textureKey);
-        tileSprite.setOrigin(0.5, 0);
-        // Native resolution - no scaling (assets should be 64x32)
-        tileSprite.setDepth(
-          this.depthFromSortPoint(screenPos.x, screenPos.y, 0)
-        );
-        this.tileSprites.set(key, tileSprite);
 
         if (
           cell.type === TileType.Building &&
@@ -1890,6 +1902,74 @@ export class MainScene extends Phaser.Scene {
         }
       }
     }
+  }
+
+  // Sync tilemap tiles with grid cell types
+  private syncTilemapWithGrid(): void {
+    if (!this.groundLayer) return;
+
+    for (let y = 0; y < GRID_HEIGHT; y++) {
+      for (let x = 0; x < GRID_WIDTH; x++) {
+        const cell = this.grid[y]?.[x];
+        if (!cell) continue;
+
+        const tileIndex = this.getTileIndexForCell(cell, x, y);
+        this.groundLayer.putTileAt(tileIndex, x, y);
+      }
+    }
+  }
+
+  // Update a single tile in the tilemap (for efficient incremental updates)
+  private updateTilemapTile(x: number, y: number): void {
+    if (!this.groundLayer) return;
+
+    const cell = this.grid[y]?.[x];
+    if (!cell) return;
+
+    const tileIndex = this.getTileIndexForCell(cell, x, y);
+    this.groundLayer.putTileAt(tileIndex, x, y);
+  }
+
+  // Get the tile index for a grid cell
+  // Handles both quadrant tiles (road, asphalt) and non-quadrant tiles (grass, snow)
+  private getTileIndexForCell(cell: GridCell, x: number, y: number): number {
+    // Helper for quadrant offset (0=TL, 1=TR, 2=BL, 3=BR)
+    const getQuadrant = () => (y % 2) * 2 + (x % 2);
+
+    if (cell.type === TileType.Road || cell.type === TileType.Tile) {
+      // Quadrant tile
+      return TileIndex.RoadTL + getQuadrant();
+    } else if (cell.type === TileType.Asphalt) {
+      // Quadrant tile
+      return TileIndex.AsphaltTL + getQuadrant();
+    } else if (cell.type === TileType.Snow) {
+      // Non-quadrant, but with variants
+      const variant = ((x * 7 + y * 13) % 3);
+      return TileIndex.Snow1 + variant;
+    } else if (cell.type === TileType.Building) {
+      // For buildings, check if it preserves underlying tile
+      if (cell.buildingId) {
+        const building = getBuilding(cell.buildingId);
+        const preservesTile =
+          building && (building.category === "props" || building.isDecoration);
+        if (preservesTile && cell.underlyingTileType) {
+          if (cell.underlyingTileType === TileType.Tile ||
+              cell.underlyingTileType === TileType.Road) {
+            return TileIndex.RoadTL + getQuadrant();
+          } else if (cell.underlyingTileType === TileType.Asphalt) {
+            return TileIndex.AsphaltTL + getQuadrant();
+          } else if (cell.underlyingTileType === TileType.Snow) {
+            const variant = ((x * 7 + y * 13) % 3);
+            return TileIndex.Snow1 + variant;
+          }
+        } else if (!preservesTile) {
+          // Non-decorative buildings show road underneath
+          return TileIndex.RoadTL + getQuadrant();
+        }
+      }
+      return TileIndex.Grass;
+    }
+    return TileIndex.Grass;
   }
 
   // Remove a building and all its vertical slices (see renderBuilding for slice docs)
@@ -1949,7 +2029,7 @@ export class MainScene extends Phaser.Scene {
     const frontX = originX + footprint.width - 1;
     const frontY = originY + footprint.height - 1;
     const screenPos = this.gridToScreen(frontX, frontY);
-    const bottomY = screenPos.y + TILE_HEIGHT;
+    const bottomY = screenPos.y + SUBTILE_HEIGHT;
 
     // Calculate tint for props (needed for each slice)
     let tint: number | null = null;
@@ -2022,10 +2102,10 @@ export class MainScene extends Phaser.Scene {
     const balancedFrontX = frontX + extendX;
     const balancedFrontY = frontY + extendY;
     const balancedGridSum = balancedFrontX + balancedFrontY;
-    const balancedScreenY = GRID_OFFSET_Y + (balancedGridSum * TILE_HEIGHT) / 2;
+    const balancedScreenY = GRID_OFFSET_Y + (balancedGridSum * SUBTILE_HEIGHT) / 2;
     const decorationDepth = this.depthFromSortPoint(
       screenPos.x,
-      balancedScreenY + TILE_HEIGHT / 2,
+      balancedScreenY + SUBTILE_HEIGHT / 2,
       0.06
     );
 
@@ -2094,11 +2174,11 @@ export class MainScene extends Phaser.Scene {
         // Frontmost tile in this column is at (frontX - i, frontY)
         // gridSum = (frontX - i) + frontY
         const sliceGridSum = frontX - i + frontY;
-        const sliceScreenY = GRID_OFFSET_Y + (sliceGridSum * TILE_HEIGHT) / 2;
+        const sliceScreenY = GRID_OFFSET_Y + (sliceGridSum * SUBTILE_HEIGHT) / 2;
         slice.setDepth(
           this.depthFromSortPoint(
             screenPos.x,
-            sliceScreenY + TILE_HEIGHT / 2,
+            sliceScreenY + SUBTILE_HEIGHT / 2,
             0.05
           )
         );
@@ -2135,11 +2215,11 @@ export class MainScene extends Phaser.Scene {
         // Frontmost tile in this row is at (frontX, frontY - i)
         // gridSum = frontX + (frontY - i)
         const sliceGridSum = frontX + frontY - i;
-        const sliceScreenY = GRID_OFFSET_Y + (sliceGridSum * TILE_HEIGHT) / 2;
+        const sliceScreenY = GRID_OFFSET_Y + (sliceGridSum * SUBTILE_HEIGHT) / 2;
         slice.setDepth(
           this.depthFromSortPoint(
             screenPos.x,
-            sliceScreenY + TILE_HEIGHT / 2,
+            sliceScreenY + SUBTILE_HEIGHT / 2,
             0.05
           )
         );
@@ -2158,7 +2238,7 @@ export class MainScene extends Phaser.Scene {
   private addLampGlow(key: string, x: number, tileY: number): void {
     // Position glow at lampshade height (offset up from tile)
     const lampshadeOffsetY = -45; // Pixels above the tile base
-    const glowY = tileY + TILE_HEIGHT / 2 + lampshadeOffsetY;
+    const glowY = tileY + SUBTILE_HEIGHT / 2 + lampshadeOffsetY;
 
     // Create pixelated glow texture if it doesn't exist
     if (!this.textures.exists("lamp_glow")) {
@@ -2168,7 +2248,7 @@ export class MainScene extends Phaser.Scene {
     // Create glow sprite using the pixelated texture
     const glow = this.add.image(x, glowY, "lamp_glow");
     glow.setBlendMode(Phaser.BlendModes.ADD);
-    glow.setDepth(this.depthFromSortPoint(x, tileY + TILE_HEIGHT / 2, 0.04)); // Just behind lamp
+    glow.setDepth(this.depthFromSortPoint(x, tileY + SUBTILE_HEIGHT / 2, 0.04)); // Just behind lamp
 
     // Add subtle pulsing animation
     this.tweens.add({
@@ -2269,7 +2349,7 @@ export class MainScene extends Phaser.Scene {
     // Update or create car sprites
     for (const car of allCars) {
       const screenPos = this.gridToScreen(car.x, car.y);
-      const groundY = screenPos.y + TILE_HEIGHT / 2;
+      const groundY = screenPos.y + SUBTILE_HEIGHT / 2;
       const textureKey = this.getCarTextureKey(car.carType, car.direction);
 
       let sprite = this.carSprites.get(car.id);
@@ -2306,7 +2386,7 @@ export class MainScene extends Phaser.Scene {
 
     for (const char of this.characters) {
       const screenPos = this.gridToScreen(char.x, char.y);
-      const centerY = screenPos.y + TILE_HEIGHT / 2;
+      const centerY = screenPos.y + SUBTILE_HEIGHT / 2;
       const textureKey = this.getCharacterTextureKey(
         char.characterType,
         char.direction
@@ -2661,8 +2741,8 @@ export class MainScene extends Phaser.Scene {
         const frontX = originX + footprint.width - 1;
         const frontY = originY + footprint.height - 1;
         const screenPos = this.gridToScreen(frontX, frontY);
-        const bottomY = screenPos.y + TILE_HEIGHT;
-        const frontGroundY = screenPos.y + TILE_HEIGHT / 2;
+        const bottomY = screenPos.y + SUBTILE_HEIGHT;
+        const frontGroundY = screenPos.y + SUBTILE_HEIGHT / 2;
 
         const buildingPreview = this.add.image(
           screenPos.x,
@@ -2819,8 +2899,8 @@ export class MainScene extends Phaser.Scene {
                 const frontX = originX + footprint.width - 1;
                 const frontY = originY + footprint.height - 1;
                 const screenPos = this.gridToScreen(frontX, frontY);
-                const bottomY = screenPos.y + TILE_HEIGHT;
-                const frontGroundY = screenPos.y + TILE_HEIGHT / 2;
+                const bottomY = screenPos.y + SUBTILE_HEIGHT;
+                const frontGroundY = screenPos.y + SUBTILE_HEIGHT / 2;
 
                 const buildingPreview = this.add.image(
                   screenPos.x,
