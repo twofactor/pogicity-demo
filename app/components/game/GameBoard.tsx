@@ -357,19 +357,13 @@ export default function GameBoard() {
             if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
               const cell = grid[y][x];
               if (cell.type === TileType.Building && cell.buildingId) {
-                const building = getBuilding(cell.buildingId);
-                if (
-                  building &&
-                  (building.category === "props" || building.isDecoration)
-                ) {
-                  grid[y][x].underlyingTileType = TileType.Tile;
-                  dirtyTiles.push({ x, y });
-                } else {
-                  break;
-                }
+                // Can place tile below any building
+                grid[y][x].underlyingTileType = TileType.Tile;
+                dirtyTiles.push({ x, y });
               } else if (
                 cell.type === TileType.Grass ||
-                cell.type === TileType.Snow
+                cell.type === TileType.Snow ||
+                cell.type === TileType.Cobblestone
               ) {
                 grid[y][x].type = TileType.Tile;
                 grid[y][x].isOrigin = true;
@@ -387,20 +381,14 @@ export default function GameBoard() {
             if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
               const cell = grid[y][x];
               if (cell.type === TileType.Building && cell.buildingId) {
-                const building = getBuilding(cell.buildingId);
-                if (
-                  building &&
-                  (building.category === "props" || building.isDecoration)
-                ) {
-                  grid[y][x].underlyingTileType = TileType.Asphalt;
-                  dirtyTiles.push({ x, y });
-                } else {
-                  break;
-                }
+                // Can place asphalt below any building
+                grid[y][x].underlyingTileType = TileType.Asphalt;
+                dirtyTiles.push({ x, y });
               } else if (
                 cell.type === TileType.Grass ||
                 cell.type === TileType.Snow ||
-                cell.type === TileType.Tile
+                cell.type === TileType.Tile ||
+                cell.type === TileType.Cobblestone
               ) {
                 grid[y][x].type = TileType.Asphalt;
                 grid[y][x].isOrigin = true;
@@ -418,21 +406,41 @@ export default function GameBoard() {
             if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
               const cell = grid[y][x];
               if (cell.type === TileType.Building && cell.buildingId) {
-                const building = getBuilding(cell.buildingId);
-                if (
-                  building &&
-                  (building.category === "props" || building.isDecoration)
-                ) {
-                  grid[y][x].underlyingTileType = TileType.Snow;
-                  dirtyTiles.push({ x, y });
-                } else {
-                  break;
-                }
+                // Can place snow below any building
+                grid[y][x].underlyingTileType = TileType.Snow;
+                dirtyTiles.push({ x, y });
               } else if (
                 cell.type === TileType.Grass ||
-                cell.type === TileType.Tile
+                cell.type === TileType.Tile ||
+                cell.type === TileType.Cobblestone
               ) {
                 grid[y][x].type = TileType.Snow;
+                grid[y][x].isOrigin = true;
+                grid[y][x].originX = x;
+                grid[y][x].originY = y;
+                dirtyTiles.push({ x, y });
+              } else {
+                break;
+              }
+              playBuildRoadSound();
+            }
+            break;
+          }
+          case ToolType.Cobblestone: {
+            if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
+              const cell = grid[y][x];
+              if (cell.type === TileType.Building && cell.buildingId) {
+                // Can place cobblestone below any building
+                grid[y][x].underlyingTileType = TileType.Cobblestone;
+                dirtyTiles.push({ x, y });
+              } else if (
+                cell.type === TileType.Grass ||
+                cell.type === TileType.Snow ||
+                cell.type === TileType.Tile ||
+                cell.type === TileType.Sidewalk ||
+                cell.type === TileType.Asphalt
+              ) {
+                grid[y][x].type = TileType.Cobblestone;
                 grid[y][x].isOrigin = true;
                 grid[y][x].originX = x;
                 grid[y][x].originY = y;
@@ -488,12 +496,13 @@ export default function GameBoard() {
                   const cell = grid[py][px];
                   const cellType = cell.type;
                   if (isDecoration) {
-                    // Decorations can be placed on grass, tile, snow, sidewalk, OR building prop slots
+                    // Decorations can be placed on grass, tile, snow, sidewalk, cobblestone, OR building prop slots
                     if (
                       cellType !== TileType.Grass &&
                       cellType !== TileType.Tile &&
                       cellType !== TileType.Snow &&
-                      cellType !== TileType.Sidewalk
+                      cellType !== TileType.Sidewalk &&
+                      cellType !== TileType.Cobblestone
                     ) {
                       // Check if it's a building tile that allows props
                       if (cellType === TileType.Building && cell.allowsProp && !cell.propId) {
@@ -532,16 +541,21 @@ export default function GameBoard() {
                     }
                   } else {
                     // Normal placement - modify the tile itself
-                    const underlyingType = isDecoration
-                      ? grid[py][px].type
-                      : undefined;
+                    // Preserve existing tile type OR existing underlyingTileType for all buildings
+                    const currentType = grid[py][px].type;
+                    const existingUnderlying = grid[py][px].underlyingTileType;
+                    const underlyingType = existingUnderlying || (currentType !== TileType.Building ? currentType : undefined);
+
                     grid[py][px].type = TileType.Building;
                     grid[py][px].buildingId = selectedBuildingId;
                     grid[py][px].isOrigin = dx === 0 && dy === 0;
                     grid[py][px].originX = bOriginX;
                     grid[py][px].originY = bOriginY;
-                    if (isDecoration) {
+                    // Preserve underlying tile for ALL buildings (not just decorations)
+                    if (underlyingType && underlyingType !== TileType.Grass) {
                       grid[py][px].underlyingTileType = underlyingType;
+                    } else {
+                      grid[py][px].underlyingTileType = undefined;
                     }
                     if (building.supportsRotation) {
                       grid[py][px].buildingOrientation = buildingOrientation;
@@ -777,17 +791,13 @@ export default function GameBoard() {
 
         if (selectedTool === ToolType.Snow) {
           if (cell.type === TileType.Building && cell.buildingId) {
-            const building = getBuilding(cell.buildingId);
-            if (
-              building &&
-              (building.category === "props" || building.isDecoration)
-            ) {
-              grid[y][x].underlyingTileType = TileType.Snow;
-              dirtyTiles.push({ x, y });
-            }
+            // Can place snow below any building
+            grid[y][x].underlyingTileType = TileType.Snow;
+            dirtyTiles.push({ x, y });
           } else if (
             cell.type === TileType.Grass ||
-            cell.type === TileType.Tile
+            cell.type === TileType.Tile ||
+            cell.type === TileType.Cobblestone
           ) {
             grid[y][x].type = TileType.Snow;
             grid[y][x].isOrigin = true;
@@ -797,17 +807,13 @@ export default function GameBoard() {
           }
         } else if (selectedTool === ToolType.Tile) {
           if (cell.type === TileType.Building && cell.buildingId) {
-            const building = getBuilding(cell.buildingId);
-            if (
-              building &&
-              (building.category === "props" || building.isDecoration)
-            ) {
-              grid[y][x].underlyingTileType = TileType.Tile;
-              dirtyTiles.push({ x, y });
-            }
+            // Can place tile below any building
+            grid[y][x].underlyingTileType = TileType.Tile;
+            dirtyTiles.push({ x, y });
           } else if (
             cell.type === TileType.Grass ||
-            cell.type === TileType.Snow
+            cell.type === TileType.Snow ||
+            cell.type === TileType.Cobblestone
           ) {
             grid[y][x].type = TileType.Tile;
             grid[y][x].isOrigin = true;
@@ -817,18 +823,14 @@ export default function GameBoard() {
           }
         } else if (selectedTool === ToolType.Asphalt) {
           if (cell.type === TileType.Building && cell.buildingId) {
-            const building = getBuilding(cell.buildingId);
-            if (
-              building &&
-              (building.category === "props" || building.isDecoration)
-            ) {
-              grid[y][x].underlyingTileType = TileType.Asphalt;
-              dirtyTiles.push({ x, y });
-            }
+            // Can place asphalt below any building
+            grid[y][x].underlyingTileType = TileType.Asphalt;
+            dirtyTiles.push({ x, y });
           } else if (
             cell.type === TileType.Grass ||
             cell.type === TileType.Snow ||
-            cell.type === TileType.Tile
+            cell.type === TileType.Tile ||
+            cell.type === TileType.Cobblestone
           ) {
             grid[y][x].type = TileType.Asphalt;
             grid[y][x].isOrigin = true;
@@ -838,18 +840,14 @@ export default function GameBoard() {
           }
         } else if (selectedTool === ToolType.Cobblestone) {
           if (cell.type === TileType.Building && cell.buildingId) {
-            const building = getBuilding(cell.buildingId);
-            if (
-              building &&
-              (building.category === "props" || building.isDecoration)
-            ) {
-              grid[y][x].underlyingTileType = TileType.Cobblestone;
-              dirtyTiles.push({ x, y });
-            }
+            // Can place cobblestone below any building
+            grid[y][x].underlyingTileType = TileType.Cobblestone;
+            dirtyTiles.push({ x, y });
           } else if (
             cell.type === TileType.Grass ||
             cell.type === TileType.Snow ||
             cell.type === TileType.Tile ||
+            cell.type === TileType.Sidewalk ||
             cell.type === TileType.Asphalt
           ) {
             grid[y][x].type = TileType.Cobblestone;
