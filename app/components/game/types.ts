@@ -99,6 +99,7 @@ export interface Car {
   waiting: number;
   carType: CarType;
   lastTurn?: TurnType;  // Prevent consecutive same-direction turns
+  inIntersection?: boolean;  // Already committed to direction in intersection
 }
 
 // Grid hierarchy (SC4/RCT style):

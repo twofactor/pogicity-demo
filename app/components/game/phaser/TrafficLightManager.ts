@@ -301,8 +301,6 @@ export class TrafficLightManager {
         }
       }
     }
-
-    console.log(`[TrafficLight] Detected ${this.intersections.size} intersections`);
   }
 
   // ============================================
@@ -487,6 +485,19 @@ export class TrafficLightManager {
     }
   }
 
+  // Register pedestrian at an intersection tile (RoadTurn)
+  // This registers them in ALL crosswalks of that intersection
+  // so cars approaching from ANY direction will see them
+  registerPedestrianAtIntersection(pedestrianId: string, tileX: number, tileY: number): void {
+    const intersection = this.getIntersectionAt(tileX, tileY);
+    if (!intersection) return;
+
+    // Register in ALL crosswalks of this intersection
+    for (const crosswalk of intersection.crosswalks) {
+      crosswalk.pedestrianIds.add(pedestrianId);
+    }
+  }
+
   // Check if any crosswalk in a car's path has pedestrians
   // direction = car's travel direction, x/y = position of the crosswalk to check
   hasPedestriansInCrosswalk(x: number, y: number, direction: Direction): boolean {
@@ -528,5 +539,26 @@ export class TrafficLightManager {
       }
     }
     return result;
+  }
+
+  // Clear ALL pedestrian registrations from ALL crosswalks
+  // Call this when clearing characters or to fix stale registrations
+  clearAllPedestrianRegistrations(): void {
+    for (const intersection of this.intersections.values()) {
+      for (const crosswalk of intersection.crosswalks) {
+        crosswalk.pedestrianIds.clear();
+      }
+    }
+  }
+
+  // Debug: Get total registered pedestrians across all crosswalks
+  getTotalRegisteredPedestrians(): number {
+    let total = 0;
+    for (const intersection of this.intersections.values()) {
+      for (const crosswalk of intersection.crosswalks) {
+        total += crosswalk.pedestrianIds.size;
+      }
+    }
+    return total;
   }
 }
