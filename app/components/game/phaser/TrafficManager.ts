@@ -215,17 +215,51 @@ export class TrafficManager {
       return { ...car, waiting: Math.min(waiting + 1, 120) };
     }
 
+    // ABSOLUTE RULE: Cars NEVER hit pedestrians in crosswalks
+    // Check if there's a pedestrian in the crosswalk ahead
+    if (this.trafficLightManager && !this.trafficLightManager.canCarEnterCrosswalkZone(x, y, direction)) {
+      // Pedestrian in crosswalk - car must wait
+      return { ...car, waiting: Math.min(waiting + 1, 120) };
+    }
+
     // Check if there's a red light ahead (we'll use this later to prevent crossing)
+    // The crosswalk zone is the RoadLane immediately before the intersection (RoadTurn)
+    // So we need to stop BEFORE entering that RoadLane
     let redLightAhead = false;
     let stopLineCenter: { x: number; y: number } | null = null;
 
     if (currentLane.type === TileType.RoadLane && this.trafficLightManager) {
       const nextLane = this.getNextLane(currentLane.originX, currentLane.originY, direction);
-      if (nextLane && nextLane.type === TileType.RoadTurn) {
-        const canProceed = this.trafficLightManager.canProceed(nextLane.originX, nextLane.originY, direction);
-        if (!canProceed) {
-          redLightAhead = true;
-          stopLineCenter = this.getLaneCenter(currentLane.originX, currentLane.originY);
+
+      if (nextLane) {
+        // Case 1: Next lane is intersection - we're ON the crosswalk, stop at our current center
+        if (nextLane.type === TileType.RoadTurn) {
+          const canProceed = this.trafficLightManager.canProceed(nextLane.originX, nextLane.originY, direction);
+          if (!canProceed) {
+            redLightAhead = true;
+            // Already in crosswalk zone - stop at current lane center
+            const center = this.getLaneCenter(currentLane.originX, currentLane.originY);
+            stopLineCenter = {
+              x: Math.round(center.x * 100) / 100,
+              y: Math.round(center.y * 100) / 100,
+            };
+          }
+        }
+        // Case 2: Next lane is RoadLane, check if THAT leads to intersection (crosswalk ahead)
+        else if (nextLane.type === TileType.RoadLane) {
+          const nextNextLane = this.getNextLane(nextLane.originX, nextLane.originY, direction);
+          if (nextNextLane && nextNextLane.type === TileType.RoadTurn) {
+            const canProceed = this.trafficLightManager.canProceed(nextNextLane.originX, nextNextLane.originY, direction);
+            if (!canProceed) {
+              redLightAhead = true;
+              // Stop at current lane center - this is BEFORE the crosswalk (next lane)
+              const center = this.getLaneCenter(currentLane.originX, currentLane.originY);
+              stopLineCenter = {
+                x: Math.round(center.x * 100) / 100,
+                y: Math.round(center.y * 100) / 100,
+              };
+            }
+          }
         }
       }
     }
@@ -276,33 +310,60 @@ export class TrafficManager {
         const alreadyTurned = car.lastTurn === "left" || car.lastTurn === "right";
 
         if (!alreadyTurned) {
-          // Haven't turned yet in this intersection - can turn
+          // Haven't turned yet in this intersection - check available turn lanes
           const turnOptions: Array<{ dir: Direction; turn: "left" | "right" }> = [];
 
-          // Check right turn
+          // Check right turn lane availability (ignore pedestrians for now)
           const rightDir = rightTurnDirection[direction];
           const rightLane = this.getNextLane(currentLane.originX, currentLane.originY, rightDir);
           if (rightLane && this.canEnterLane(rightLane, rightDir)) {
             turnOptions.push({ dir: rightDir, turn: "right" });
           }
 
-          // Check left turn
+          // Check left turn lane availability (ignore pedestrians for now)
           const leftDir = leftTurnDirection[direction];
           const leftLane = this.getNextLane(currentLane.originX, currentLane.originY, leftDir);
           if (leftLane && this.canEnterLane(leftLane, leftDir)) {
             turnOptions.push({ dir: leftDir, turn: "left" });
           }
 
-          // Randomly pick: 70% go straight, 30% turn (if options available)
-          if (turnOptions.length > 0 && Math.random() < 0.3) {
-            const chosen = turnOptions[Math.floor(Math.random() * turnOptions.length)];
-            newDirection = chosen.dir;
-            nextX = laneCenter.x;
-            nextY = laneCenter.y;
-            car = { ...car, lastTurn: chosen.turn };
+          // Decide if car wants to turn (based on car ID for consistent behavior)
+          if (turnOptions.length > 0) {
+            const hashBase = car.id.charCodeAt(0) + car.id.charCodeAt(1) * 256;
+            const positionFactor = Math.floor(x * 7 + y * 13) % 100;
+            const turnChance = ((hashBase + positionFactor) % 100) / 100;
+
+            if (turnChance < 0.3) {
+              // Car wants to turn - pick which direction
+              const choiceIndex = (hashBase + Math.floor(x + y)) % turnOptions.length;
+              const chosen = turnOptions[choiceIndex];
+
+              // Check if pedestrians are in the crosswalk in the turn direction
+              const pathClear = !this.trafficLightManager ||
+                this.trafficLightManager.canCarEnterCrosswalkZone(x, y, chosen.dir);
+
+              if (!pathClear) {
+                // Pedestrian in crosswalk - wait briefly, but don't block traffic forever
+                // After waiting too long, give up the turn and go straight
+                if (waiting > 60) {
+                  // Give up on turning - just go straight to avoid blocking traffic
+                  car = { ...car, lastTurn: "straight" };
+                  // Continue with straight movement below
+                } else {
+                  // Wait for pedestrian to clear
+                  return { ...car, x: laneCenter.x, y: laneCenter.y, direction, waiting: Math.min(waiting + 1, 120) };
+                }
+              } else {
+                // Path is clear - execute the turn
+                newDirection = chosen.dir;
+                nextX = laneCenter.x;
+                nextY = laneCenter.y;
+                car = { ...car, lastTurn: chosen.turn };
+              }
+            }
           }
         }
-        // If already turned or going straight, just continue (direction unchanged)
+        // If already turned, just continue straight (direction unchanged)
       } else {
         // On RoadLane (not intersection) - reset lastTurn so car can turn at next intersection
         if (car.lastTurn !== "straight" && car.lastTurn !== "none") {
@@ -318,11 +379,11 @@ export class TrafficManager {
 
     // If red light ahead, don't let car cross the stop line
     if (redLightAhead && stopLineCenter) {
-      // Check if car would cross past the stop line (lane center) OR is already at it
-      const atStopLine = Math.abs(x - stopLineCenter.x) < 0.1 && Math.abs(y - stopLineCenter.y) < 0.1;
+      // Check if car is already at stop line (use speed as threshold to catch it in one frame)
+      const atStopLine = Math.abs(x - stopLineCenter.x) < speed * 1.5 && Math.abs(y - stopLineCenter.y) < speed * 1.5;
       const wouldCross = this.wouldCrossStopLine(x, y, nextX, nextY, stopLineCenter, newDirection);
       if (atStopLine || wouldCross) {
-        // Stay at stop line - car waits for green
+        // Stay at stop line - car waits for green (snap to exact position to prevent jitter)
         return { ...car, x: stopLineCenter.x, y: stopLineCenter.y, direction: newDirection, waiting: Math.min(waiting + 1, 120) };
       }
     }

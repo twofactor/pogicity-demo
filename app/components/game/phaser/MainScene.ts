@@ -43,7 +43,7 @@ import {
 } from "@/app/data/buildings";
 import { loadGifAsAnimation, playGifAnimation } from "./GifLoader";
 import { TrafficManager } from "./TrafficManager";
-import { TrafficLightManager, Intersection } from "./TrafficLightManager";
+import { TrafficLightManager, Intersection, Crosswalk } from "./TrafficLightManager";
 
 // Event types for React communication
 export interface SceneEvents {
@@ -118,6 +118,7 @@ export class MainScene extends Phaser.Scene {
   private trafficManager: TrafficManager = new TrafficManager();
   private trafficLightManager: TrafficLightManager = new TrafficLightManager();
   private trafficLightIndicators: Phaser.GameObjects.Graphics | null = null;
+  private crosswalkGraphics: Phaser.GameObjects.Graphics | null = null;
 
   // Tool state (synced from React)
   private selectedTool: ToolType = ToolType.RoadLane;
@@ -503,13 +504,14 @@ export class MainScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (!this.isReady) return;
 
-    // Update game entities
+    // Update game entities (pass delta time for frame-rate independent timing)
     this.updateCharacters();
-    this.trafficLightManager.update();
+    this.trafficLightManager.update(delta);
     this.trafficManager.update();
 
-    // Render traffic light indicators
+    // Render traffic light indicators and crosswalks
     this.renderTrafficLights();
+    this.renderCrosswalks();
 
     // Center camera on first frame (camera dimensions now known)
     if (this.needsCameraCenter) {
@@ -528,6 +530,11 @@ export class MainScene extends Phaser.Scene {
     if (this.gridDirty) {
       this.applyGridUpdates();
       this.gridDirty = false;
+    }
+
+    // Refresh debug overlay every frame (shows traffic light states)
+    if (this.showPaths) {
+      this.renderPathOverlay();
     }
 
     // Update stats display
@@ -665,7 +672,38 @@ export class MainScene extends Phaser.Scene {
     const gy = Math.floor(y);
     if (gx < 0 || gx >= GRID_WIDTH || gy < 0 || gy >= GRID_HEIGHT) return false;
     const tileType = this.grid[gy][gx].type;
-    return tileType === TileType.Sidewalk || tileType === TileType.Tile || tileType === TileType.Cobblestone;
+    // Regular walkable surfaces (always walkable)
+    if (tileType === TileType.Sidewalk || tileType === TileType.Tile || tileType === TileType.Cobblestone) {
+      return true;
+    }
+    // RoadTurn (intersection tiles) - walkable ONLY during ALL_RED phases
+    // This allows pedestrians to cross through the intersection when safe
+    if (tileType === TileType.RoadTurn) {
+      return this.trafficLightManager.canWalkThroughIntersection(gx, gy);
+    }
+    // RoadLane tiles - walkable if in a crosswalk zone
+    if (tileType === TileType.RoadLane) {
+      const crosswalkResult = this.trafficLightManager.getCrosswalkAt(x, y);
+      if (crosswalkResult) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Check if pedestrian can enter a crosswalk (signal must allow, or already crossing)
+  private canEnterCrosswalk(x: number, y: number, alreadyInCrossingMode: boolean): boolean {
+    const crosswalkResult = this.trafficLightManager.getCrosswalkAt(x, y);
+    if (!crosswalkResult) return true; // Not a crosswalk, no restriction
+
+    // If already in crossing mode, always allow (must finish crossing)
+    if (alreadyInCrossingMode) return true;
+
+    // Check if this specific crosswalk allows crossing based on traffic phase
+    return this.trafficLightManager.canCrossAtCrosswalk(
+      crosswalkResult.intersection,
+      crosswalkResult.crosswalk
+    );
   }
 
   private getValidDirections(tileX: number, tileY: number): Direction[] {
@@ -700,18 +738,42 @@ export class MainScene extends Phaser.Scene {
   }
 
   private updateSingleCharacter(char: Character): Character {
-    const { x, y, direction, speed } = char;
+    const { x, y, direction, speed, inCrosswalk } = char;
     const vec = directionVectors[direction];
     const tileX = Math.floor(x);
     const tileY = Math.floor(y);
+    const tileType = this.grid[tileY]?.[tileX]?.type;
 
-    // Check if current tile is still walkable
-    if (!this.isWalkable(tileX, tileY)) {
+    // "Crossing mode" = pedestrian is on road tiles (crosswalk or intersection)
+    // Once in crossing mode, they MUST continue until they reach sidewalk
+    const wasInCrossingMode = inCrosswalk || false;
+    const onRoadTile = tileType === TileType.RoadLane || tileType === TileType.RoadTurn;
+    const nowInCrossingMode = onRoadTile;
+
+    // Track crosswalk registration for car yielding
+    const currentCrosswalk = this.trafficLightManager.getCrosswalkAt(x, y);
+    if (currentCrosswalk && !wasInCrossingMode) {
+      this.trafficLightManager.enterCrosswalk(char.id, x, y);
+    }
+    if (wasInCrossingMode && !onRoadTile) {
+      // Exited road - unregister from crosswalks
+      this.trafficLightManager.removeFromAllCrosswalks(char.id);
+    }
+
+    // Check if current tile is walkable
+    // CRITICAL: If already in crossing mode, pedestrian can continue on road tiles
+    // even if the signal changed - they must finish crossing!
+    const currentlyWalkable = this.isWalkable(tileX, tileY);
+    const canStayHere = currentlyWalkable || (wasInCrossingMode && onRoadTile);
+
+    if (!canStayHere) {
+      // Truly not walkable and not in crossing mode - relocate
+      this.trafficLightManager.removeFromAllCrosswalks(char.id);
       const walkableTiles: { x: number; y: number }[] = [];
       for (let gy = 0; gy < GRID_HEIGHT; gy++) {
         for (let gx = 0; gx < GRID_WIDTH; gx++) {
-          const tileType = this.grid[gy][gx].type;
-          if (tileType === TileType.Sidewalk || tileType === TileType.Tile || tileType === TileType.Cobblestone) {
+          const tt = this.grid[gy][gx].type;
+          if (tt === TileType.Sidewalk || tt === TileType.Tile || tt === TileType.Cobblestone) {
             walkableTiles.push({ x: gx, y: gy });
           }
         }
@@ -725,9 +787,10 @@ export class MainScene extends Phaser.Scene {
           y: newTile.y + 0.5,
           direction:
             allDirections[Math.floor(Math.random() * allDirections.length)],
+          inCrosswalk: false,
         };
       }
-      return char;
+      return { ...char, inCrosswalk: false };
     }
 
     const inTileX = x - tileX;
@@ -744,8 +807,27 @@ export class MainScene extends Phaser.Scene {
     if (nearCenter) {
       const nextTileX = tileX + vec.dx;
       const nextTileY = tileY + vec.dy;
+      const nextTileType = this.grid[nextTileY]?.[nextTileX]?.type;
+      const nextIsRoad = nextTileType === TileType.RoadLane || nextTileType === TileType.RoadTurn;
 
-      if (!this.isWalkable(nextTileX, nextTileY)) {
+      // Check if next tile is walkable
+      // If ALREADY in crossing mode (from previous frame), road tiles are always walkable
+      const nextWalkable = this.isWalkable(nextTileX, nextTileY) || (wasInCrossingMode && nextIsRoad);
+
+      // Check signal - can we enter a new crosswalk/intersection?
+      // Use wasInCrossingMode so we only skip signal check if we were ALREADY crossing
+      const canEnterNext = this.canEnterCrosswalk(nextTileX + 0.5, nextTileY + 0.5, wasInCrossingMode);
+
+      if (!nextWalkable || !canEnterNext) {
+        // Can't proceed - wait or turn
+        if (!canEnterNext && nextWalkable) {
+          // Waiting for crosswalk signal - stay at tile center
+          return { ...char, x: tileX + 0.5, y: tileY + 0.5, direction, inCrosswalk: nowInCrossingMode };
+        }
+        // If in crossing mode, WAIT at center - don't turn around (must finish crossing)
+        if (nowInCrossingMode) {
+          return { ...char, x: tileX + 0.5, y: tileY + 0.5, direction, inCrosswalk: true };
+        }
         const newDir = this.pickNewDirection(tileX, tileY, direction);
         if (newDir) {
           newDirection = newDir;
@@ -753,13 +835,16 @@ export class MainScene extends Phaser.Scene {
         nextX = tileX + 0.5;
         nextY = tileY + 0.5;
       } else {
-        const validDirs = this.getValidDirections(tileX, tileY);
-        if (validDirs.length > 2 && Math.random() < 0.1) {
-          const newDir = this.pickNewDirection(tileX, tileY, direction);
-          if (newDir) {
-            newDirection = newDir;
-            nextX = tileX + 0.5;
-            nextY = tileY + 0.5;
+        // Random direction change at intersections - but NOT when crossing roads
+        if (!nowInCrossingMode) {
+          const validDirs = this.getValidDirections(tileX, tileY);
+          if (validDirs.length > 2 && Math.random() < 0.1) {
+            const newDir = this.pickNewDirection(tileX, tileY, direction);
+            if (newDir) {
+              newDirection = newDir;
+              nextX = tileX + 0.5;
+              nextY = tileY + 0.5;
+            }
           }
         }
       }
@@ -771,17 +856,28 @@ export class MainScene extends Phaser.Scene {
 
     const finalTileX = Math.floor(nextX);
     const finalTileY = Math.floor(nextY);
+    const finalTileType = this.grid[finalTileY]?.[finalTileX]?.type;
+    const finalIsRoad = finalTileType === TileType.RoadLane || finalTileType === TileType.RoadTurn;
 
-    if (!this.isWalkable(finalTileX, finalTileY)) {
+    // Check if final position is walkable
+    // If ALREADY in crossing mode (from previous frame), road tiles are accessible
+    const finalWalkable = this.isWalkable(finalTileX, finalTileY) || (wasInCrossingMode && finalIsRoad);
+    const canEnterFinal = this.canEnterCrosswalk(nextX, nextY, wasInCrossingMode);
+
+    if (!finalWalkable || !canEnterFinal) {
       return {
         ...char,
         x: tileX + 0.5,
         y: tileY + 0.5,
         direction: newDirection,
+        inCrosswalk: nowInCrossingMode,
       };
     }
 
-    return { ...char, x: nextX, y: nextY, direction: newDirection };
+    // Update crossing mode: true if on road tile, false if on sidewalk
+    const willBeInCrossingMode = finalIsRoad;
+
+    return { ...char, x: nextX, y: nextY, direction: newDirection, inCrosswalk: willBeInCrossingMode };
   }
 
   // ============================================
@@ -1391,6 +1487,10 @@ export class MainScene extends Phaser.Scene {
   }
 
   clearCharacters(): void {
+    // Unregister all characters from crosswalks
+    for (const char of this.characters) {
+      this.trafficLightManager.removeFromAllCrosswalks(char.id);
+    }
     this.characters = [];
     this.characterSprites.forEach((sprite) => sprite.destroy());
     this.characterSprites.clear();
@@ -1552,6 +1652,25 @@ export class MainScene extends Phaser.Scene {
           color = 0xcc88ff; // Purple for cobblestone (walkable)
         } else if (tileType === TileType.Asphalt) {
           color = 0xffcc00;
+        }
+
+        // Intersection (RoadTurn) - check if pedestrians can walk through
+        if (tileType === TileType.RoadTurn) {
+          const canWalk = this.trafficLightManager.canWalkThroughIntersection(x, y);
+          color = canWalk ? 0x00ff00 : 0xff0000; // Green if walkable, red if not
+        }
+        // RoadLane - check if it's in a crosswalk and if that crosswalk is active
+        else if (tileType === TileType.RoadLane) {
+          const crosswalkResult = this.trafficLightManager.getCrosswalkAt(x, y);
+          if (crosswalkResult) {
+            const canCross = this.trafficLightManager.canCrossAtCrosswalk(
+              crosswalkResult.intersection,
+              crosswalkResult.crosswalk
+            );
+            color = canCross ? 0x00ff00 : 0xffaa00; // Green if active, orange if waiting
+          } else {
+            color = 0x666666; // Gray for regular road lane (not walkable)
+          }
         }
 
         if (color !== null) {
@@ -1929,7 +2048,7 @@ export class MainScene extends Phaser.Scene {
     //   0.04 - Lamp glow effects (behind lamps)
     //   0.05 - Buildings (regular structures)
     //   0.06 - Extended decorations (trees with foliage beyond footprint)
-    //   0.10 - Cars
+    //   0.07 - Cars (same depth band as props for proper isometric sorting)
     //   0.20 - Characters
     //
     // FUTURE: When adding fences, traffic lights, etc., use this render order:
@@ -2241,7 +2360,7 @@ export class MainScene extends Phaser.Scene {
         sprite.setPosition(screenPos.x, groundY);
         sprite.setTexture(textureKey);
       }
-      sprite.setDepth(this.depthFromSortPoint(screenPos.x, groundY, 0.1));
+      sprite.setDepth(this.depthFromSortPoint(screenPos.x, groundY, 0.07));
     }
   }
 
@@ -2321,6 +2440,79 @@ export class MainScene extends Phaser.Scene {
       }
     }
     return 0xff0000; // Default red
+  }
+
+  // Render crosswalk stripes on the ground
+  private renderCrosswalks(): void {
+    // Clear previous crosswalks
+    if (this.crosswalkGraphics) {
+      this.crosswalkGraphics.destroy();
+      this.crosswalkGraphics = null;
+    }
+
+    const allCrosswalks = this.trafficLightManager.getAllCrosswalks();
+    if (allCrosswalks.length === 0) return;
+
+    const graphics = this.add.graphics();
+    // Render above ground but below everything else
+    graphics.setDepth(5);
+
+    for (const { intersection, crosswalk } of allCrosswalks) {
+      // Determine if this crosswalk has walk signal
+      const canWalk = this.trafficLightManager.canPedestriansCross(intersection.id);
+      const hasPedestrians = crosswalk.pedestrianIds.size > 0;
+
+      // Draw crosswalk stripes
+      const stripeColor = canWalk ? 0xffffff : 0xcccccc;
+      const stripeAlpha = canWalk ? 0.9 : 0.6;
+
+      // Calculate if horizontal or vertical crosswalk
+      const isHorizontal = crosswalk.approachDirection === Direction.Up ||
+                          crosswalk.approachDirection === Direction.Down;
+
+      if (isHorizontal) {
+        // Horizontal stripes (for NS roads)
+        const numStripes = Math.floor((crosswalk.maxX - crosswalk.minX) / 0.5);
+        for (let i = 0; i < numStripes; i++) {
+          const stripeX = crosswalk.minX + i * 0.5 + 0.25;
+          const stripeY1 = crosswalk.minY;
+          const stripeY2 = crosswalk.maxY;
+
+          const start = this.gridToScreen(stripeX, stripeY1);
+          const end = this.gridToScreen(stripeX, stripeY2);
+
+          graphics.lineStyle(3, stripeColor, stripeAlpha);
+          graphics.strokeLineShape(new Phaser.Geom.Line(start.x, start.y, end.x, end.y));
+        }
+      } else {
+        // Vertical stripes (for EW roads)
+        const numStripes = Math.floor((crosswalk.maxY - crosswalk.minY) / 0.5);
+        for (let i = 0; i < numStripes; i++) {
+          const stripeX1 = crosswalk.minX;
+          const stripeX2 = crosswalk.maxX;
+          const stripeY = crosswalk.minY + i * 0.5 + 0.25;
+
+          const start = this.gridToScreen(stripeX1, stripeY);
+          const end = this.gridToScreen(stripeX2, stripeY);
+
+          graphics.lineStyle(3, stripeColor, stripeAlpha);
+          graphics.strokeLineShape(new Phaser.Geom.Line(start.x, start.y, end.x, end.y));
+        }
+      }
+
+      // Draw walk signal indicator if pedestrians can cross
+      if (canWalk) {
+        const centerX = (crosswalk.minX + crosswalk.maxX) / 2;
+        const centerY = (crosswalk.minY + crosswalk.maxY) / 2;
+        const screenPos = this.gridToScreen(centerX, centerY);
+
+        // Green walk indicator
+        graphics.fillStyle(0x00ff00, 0.8);
+        graphics.fillCircle(screenPos.x, screenPos.y - 10, 4);
+      }
+    }
+
+    this.crosswalkGraphics = graphics;
   }
 
   private renderCharacters(): void {

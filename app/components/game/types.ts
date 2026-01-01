@@ -76,6 +76,8 @@ export interface Character {
   direction: Direction;
   speed: number;
   characterType: CharacterType;
+  // Crosswalk state - once in crosswalk, character continues until they exit
+  inCrosswalk?: boolean;
 }
 
 export enum CarType {

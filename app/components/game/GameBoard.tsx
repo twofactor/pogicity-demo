@@ -1842,17 +1842,21 @@ export default function GameBoard() {
           title="Build Menu"
           style={{
             background: isToolWindowVisible ? "#4a1a1a" : "#6b2a2a",
-            border: "2px solid",
-            borderColor: isToolWindowVisible
-              ? "#4a1a1a #ab6a6a #ab6a6a #4a1a1a" // Inverted for active
-              : "#ab6a6a #4a1a1a #4a1a1a #ab6a6a", // Normal
+            borderStyle: "solid",
+            borderTopWidth: 0,
+            borderRightWidth: "2px",
+            borderBottomWidth: "2px",
+            borderLeftWidth: "2px",
+            borderTopColor: "transparent",
+            borderRightColor: isToolWindowVisible ? "#ab6a6a" : "#4a1a1a",
+            borderBottomColor: isToolWindowVisible ? "#ab6a6a" : "#4a1a1a",
+            borderLeftColor: isToolWindowVisible ? "#4a1a1a" : "#ab6a6a",
             padding: 0,
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             borderRadius: 0,
-            borderTop: "none",
             boxShadow: isToolWindowVisible
               ? "inset 1px 1px 0px #2a0a0a"
               : "1px 1px 0px #2a0a0a",
