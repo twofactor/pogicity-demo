@@ -57,7 +57,11 @@ import {
   canPlaceRoadLane,
   updateDeadEnds,
   isRoadTileType,
+  // Lot-based road system
+  placeRoadLot,
+  updateLotAndNeighbors,
 } from "./roadUtils";
+import { LOT_SIZE, getLotOrigin } from "./types";
 import { getBuilding, getBuildingFootprint, getPropSlots } from "@/app/data/buildings";
 import dynamic from "next/dynamic";
 import type { PhaserGameHandle } from "./phaser/PhaserGame";
@@ -840,211 +844,40 @@ export default function GameBoard() {
     []
   );
 
-  // Handle 2-way road placement with sidewalks
-  // Complete road structure (6 subtiles wide):
-  //   Horizontal: sidewalk row, lane (right), lane (left), sidewalk row
-  //   Vertical: sidewalk col, lane (down), lane (up), sidewalk col
+  // Handle 2-way road placement with sidewalks (LOT-BASED)
+  // Each lot is 8x8 subtiles with lanes in center and sidewalks on edges
+  // Auto-detects adjacent lots to configure intersections
   const handleTwoWayRoadDrag = useCallback(
-    (lanes: Array<{ x: number; y: number }>, orientation: "horizontal" | "vertical", includeSidewalks: boolean = true) => {
-      if (lanes.length === 0) return;
+    (lots: Array<{ x: number; y: number }>, _orientation: "horizontal" | "vertical", _includeSidewalks: boolean = true) => {
+      if (lots.length === 0) return;
 
       const grid = gridRef.current;
       const dirtyTiles: Array<{ x: number; y: number }> = [];
-      const placedLanes = new Set<string>();
+      const placedLots = new Set<string>();
 
-      // First pass: place all lanes (allow overlap for intersections)
-      for (const { x: laneX, y: laneY } of lanes) {
-        const placementCheck = canPlaceRoadLane(grid, laneX, laneY, true);
-        if (!placementCheck.valid) continue;
+      // First pass: place all lots
+      for (const { x: lotX, y: lotY } of lots) {
+        const lotKey = `${lotX},${lotY}`;
+        if (placedLots.has(lotKey)) continue;
+        placedLots.add(lotKey);
 
-        // Determine direction based on position within the 2-way road
-        // Right-hand traffic: stay on the right side of road
-        let direction: Direction;
-        if (orientation === "horizontal") {
-          // Top lane goes Left (←westbound), bottom lane goes Right (→eastbound)
-          const hasLaneBelow = lanes.some(l => l.x === laneX && l.y === laneY + ROAD_LANE_SIZE);
-          direction = hasLaneBelow ? Direction.Left : Direction.Right;
-        } else {
-          // Left lane goes Down (↓southbound), right lane goes Up (↑northbound)
-          const hasLaneRight = lanes.some(l => l.y === laneY && l.x === laneX + ROAD_LANE_SIZE);
-          direction = hasLaneRight ? Direction.Down : Direction.Up;
-        }
-
-        // Place 2x2 road lane
-        const existingCell = grid[laneY]?.[laneX];
-        const existingDir = existingCell?.laneDirection;
-
-        // Only treat as intersection if roads are PERPENDICULAR
-        // (extending a road in same/opposite direction is NOT an intersection)
-        const isHorizontal = (d: Direction) => d === Direction.Right || d === Direction.Left;
-        const isVertical = (d: Direction) => d === Direction.Down || d === Direction.Up;
-        const isPerpendicular = existingDir && (
-          (isHorizontal(existingDir) && isVertical(direction)) ||
-          (isVertical(existingDir) && isHorizontal(direction))
-        );
-        const isIntersection = existingCell && isRoadTileType(existingCell.type) && isPerpendicular;
-
-        if (isIntersection && existingDir) {
-          // At PERPENDICULAR intersection: assign direction based on quadrant
-          //
-          // 4-way intersection pattern (rotated turn tiles for right-hand traffic):
-          //   ↓  ←   (top-left=Down, top-right=Left)
-          //   →  ↑   (bottom-left=Right, bottom-right=Up)
-          //
-          // Each cell's direction = the direction traffic ENTERS from that side
-          // RoadTurn allows going straight OR turning right
-          //
-          // Horizontal lanes: Right=top, Left=bottom
-          // Vertical lanes: Down=left, Up=right
-          const existingIsHorizontal = existingDir === Direction.Right || existingDir === Direction.Left;
-
-          let isTopLane: boolean;
-          let isLeftLane: boolean;
-
-          if (existingIsHorizontal) {
-            // Existing is horizontal, new is vertical
-            // Horizontal: Left(←)=top, Right(→)=bottom
-            // Vertical: Down(↓)=left, Up(↑)=right
-            isTopLane = existingDir === Direction.Left;
-            isLeftLane = direction === Direction.Down;
-          } else {
-            // Existing is vertical, new is horizontal
-            isTopLane = direction === Direction.Left;
-            isLeftLane = existingDir === Direction.Down;
-          }
-
-          // Pattern for right-hand traffic (enter cell, go straight or turn right):
-          //   ↓  ←   (top-left=Down for ↓traffic, top-right=Left for ←traffic)
-          //   →  ↑   (bottom-left=Right for →traffic, bottom-right=Up for ↑traffic)
-          let intersectionDir: Direction;
-          if (isTopLane && isLeftLane) intersectionDir = Direction.Down;
-          else if (isTopLane && !isLeftLane) intersectionDir = Direction.Left;
-          else if (!isTopLane && isLeftLane) intersectionDir = Direction.Right;
-          else intersectionDir = Direction.Up;
-
-          for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
-            for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
-              const px = laneX + dx;
-              const py = laneY + dy;
-              if (px < GRID_WIDTH && py < GRID_HEIGHT) {
-                grid[py][px].type = TileType.RoadTurn;
-                grid[py][px].isOrigin = dx === 0 && dy === 0;
-                grid[py][px].originX = laneX;
-                grid[py][px].originY = laneY;
-                grid[py][px].laneDirection = intersectionDir;
-                dirtyTiles.push({ x: px, y: py });
-              }
-            }
-          }
-        } else {
-          // Normal lane placement
-          for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
-            for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
-              const px = laneX + dx;
-              const py = laneY + dy;
-              if (px < GRID_WIDTH && py < GRID_HEIGHT) {
-                grid[py][px].type = TileType.RoadLane;
-                grid[py][px].isOrigin = dx === 0 && dy === 0;
-                grid[py][px].originX = laneX;
-                grid[py][px].originY = laneY;
-                grid[py][px].laneDirection = direction;
-                dirtyTiles.push({ x: px, y: py });
-              }
-            }
-          }
-        }
-        placedLanes.add(`${laneX},${laneY}`);
+        // Place the road lot (auto-configures based on adjacent roads)
+        const lotTiles = placeRoadLot(grid, lotX, lotY);
+        dirtyTiles.push(...lotTiles);
       }
 
-      // Second pass: place 2x2 sidewalk blocks on outer edges (matching lane size)
-      // Only if includeSidewalks is true (TwoWayRoad has them, SidewalklessRoad doesn't)
-      if (includeSidewalks && orientation === "horizontal") {
-        // Group lanes by x position to find road segments
-        const lanesByX = new Map<number, number[]>();
-        for (const { x: laneX, y: laneY } of lanes) {
-          if (!placedLanes.has(`${laneX},${laneY}`)) continue;
-          if (!lanesByX.has(laneX)) lanesByX.set(laneX, []);
-          lanesByX.get(laneX)!.push(laneY);
-        }
-
-        for (const [x, ys] of lanesByX) {
-          const minY = Math.min(...ys);
-          const maxY = Math.max(...ys);
-
-          // Sidewalk block above top lane (2x2 block at y = minY - 2)
-          for (let sy = 0; sy < ROAD_LANE_SIZE; sy++) {
-            for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
-              const px = x + dx;
-              const py = minY - ROAD_LANE_SIZE + sy;
-              if (py >= 0 && px < GRID_WIDTH && grid[py]?.[px]?.type === TileType.Grass) {
-                grid[py][px].type = TileType.Sidewalk;
-                dirtyTiles.push({ x: px, y: py });
-              }
-            }
-          }
-
-          // Sidewalk block below bottom lane (2x2 block at y = maxY + ROAD_LANE_SIZE)
-          for (let sy = 0; sy < ROAD_LANE_SIZE; sy++) {
-            for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
-              const px = x + dx;
-              const py = maxY + ROAD_LANE_SIZE + sy;
-              if (py < GRID_HEIGHT && px < GRID_WIDTH && grid[py]?.[px]?.type === TileType.Grass) {
-                grid[py][px].type = TileType.Sidewalk;
-                dirtyTiles.push({ x: px, y: py });
-              }
-            }
-          }
-        }
-      } else if (includeSidewalks && orientation === "vertical") {
-        // Vertical road - group lanes by y position
-        const lanesByY = new Map<number, number[]>();
-        for (const { x: laneX, y: laneY } of lanes) {
-          if (!placedLanes.has(`${laneX},${laneY}`)) continue;
-          if (!lanesByY.has(laneY)) lanesByY.set(laneY, []);
-          lanesByY.get(laneY)!.push(laneX);
-        }
-
-        for (const [y, xs] of lanesByY) {
-          const minX = Math.min(...xs);
-          const maxX = Math.max(...xs);
-
-          // Sidewalk block left of left lane (2x2 block at x = minX - 2)
-          for (let sx = 0; sx < ROAD_LANE_SIZE; sx++) {
-            for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
-              const px = minX - ROAD_LANE_SIZE + sx;
-              const py = y + dy;
-              if (px >= 0 && py < GRID_HEIGHT && grid[py]?.[px]?.type === TileType.Grass) {
-                grid[py][px].type = TileType.Sidewalk;
-                dirtyTiles.push({ x: px, y: py });
-              }
-            }
-          }
-
-          // Sidewalk block right of right lane (2x2 block at x = maxX + ROAD_LANE_SIZE)
-          for (let sx = 0; sx < ROAD_LANE_SIZE; sx++) {
-            for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
-              const px = maxX + ROAD_LANE_SIZE + sx;
-              const py = y + dy;
-              if (px < GRID_WIDTH && py < GRID_HEIGHT && grid[py]?.[px]?.type === TileType.Grass) {
-                grid[py][px].type = TileType.Sidewalk;
-                dirtyTiles.push({ x: px, y: py });
-              }
-            }
-          }
-        }
+      // Second pass: update all placed lots and their neighbors
+      // This ensures intersections are properly configured
+      for (const lotKey of placedLots) {
+        const [lotX, lotY] = lotKey.split(",").map(Number);
+        const neighborTiles = updateLotAndNeighbors(grid, lotX, lotY);
+        dirtyTiles.push(...neighborTiles);
       }
 
       if (dirtyTiles.length > 0) {
-        // NOTE: Intersection detection is handled during placement above (perpendicular overlap = RoadTurn)
-        // Do NOT call updateIntersections here - it incorrectly converts approach lanes to RoadTurn
-        // because they have perpendicular neighbors (the intersection itself)
-
-        // Detect and update dead ends (convert to RoadTurn for U-turns)
-        const deadEndTiles = updateDeadEnds(grid, dirtyTiles);
-        dirtyTiles.push(...deadEndTiles);
-
         phaserGameRef.current?.markTilesDirty(dirtyTiles);
         playBuildRoadSound();
+        phaserGameRef.current?.shakeScreen("y", 0.4, 100);
         forceGridUpdate();
       }
     },

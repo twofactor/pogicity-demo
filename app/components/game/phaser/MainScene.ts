@@ -803,52 +803,64 @@ export class MainScene extends Phaser.Scene {
             }
           }
 
-          // Clear and rebuild drag tiles for road lanes
+          // Clear and rebuild drag tiles for road lanes/lots
           this.dragTiles.clear();
 
-          // Constrain to the determined direction
+          // Check if using lot-based placement (TwoWayRoad/SidewalklessRoad)
           const isTwoWay = this.selectedTool === ToolType.TwoWayRoad || this.selectedTool === ToolType.SidewalklessRoad;
 
-          if (this.dragDirection === "horizontal") {
-            // Only add lanes along horizontal line
-            const startX = Math.min(this.dragStartTile.x, tileX);
-            const endX = Math.max(this.dragStartTile.x, tileX);
-            const startLane = getRoadLaneOrigin(startX, this.dragStartTile.y);
-            const endLane = getRoadLaneOrigin(endX, this.dragStartTile.y);
+          if (isTwoWay) {
+            // LOT-BASED: Snap to 8x8 lots
+            if (this.dragDirection === "horizontal") {
+              const startX = Math.min(this.dragStartTile.x, tileX);
+              const endX = Math.max(this.dragStartTile.x, tileX);
+              const startLot = getLotOrigin(startX, this.dragStartTile.y);
+              const endLot = getLotOrigin(endX, this.dragStartTile.y);
 
-            const startLaneX = Math.min(startLane.x, endLane.x);
-            const endLaneX = Math.max(startLane.x, endLane.x);
+              const startLotX = Math.min(startLot.x, endLot.x);
+              const endLotX = Math.max(startLot.x, endLot.x);
 
-            for (
-              let laneX = startLaneX;
-              laneX <= endLaneX;
-              laneX += ROAD_LANE_SIZE
-            ) {
-              this.dragTiles.add(`${laneX},${startLane.y}`);
-              // For 2-way roads, add parallel lane below
-              if (isTwoWay) {
-                this.dragTiles.add(`${laneX},${startLane.y + ROAD_LANE_SIZE}`);
+              for (let lotX = startLotX; lotX <= endLotX; lotX += LOT_SIZE) {
+                this.dragTiles.add(`${lotX},${startLot.y}`);
+              }
+            } else if (this.dragDirection === "vertical") {
+              const startY = Math.min(this.dragStartTile.y, tileY);
+              const endY = Math.max(this.dragStartTile.y, tileY);
+              const startLot = getLotOrigin(this.dragStartTile.x, startY);
+              const endLot = getLotOrigin(this.dragStartTile.x, endY);
+
+              const startLotY = Math.min(startLot.y, endLot.y);
+              const endLotY = Math.max(startLot.y, endLot.y);
+
+              for (let lotY = startLotY; lotY <= endLotY; lotY += LOT_SIZE) {
+                this.dragTiles.add(`${startLot.x},${lotY}`);
               }
             }
-          } else if (this.dragDirection === "vertical") {
-            // Only add lanes along vertical line
-            const startY = Math.min(this.dragStartTile.y, tileY);
-            const endY = Math.max(this.dragStartTile.y, tileY);
-            const startLane = getRoadLaneOrigin(this.dragStartTile.x, startY);
-            const endLane = getRoadLaneOrigin(this.dragStartTile.x, endY);
+          } else {
+            // LANE-BASED: 2x2 lanes for RoadLane/RoadTurn
+            if (this.dragDirection === "horizontal") {
+              const startX = Math.min(this.dragStartTile.x, tileX);
+              const endX = Math.max(this.dragStartTile.x, tileX);
+              const startLane = getRoadLaneOrigin(startX, this.dragStartTile.y);
+              const endLane = getRoadLaneOrigin(endX, this.dragStartTile.y);
 
-            const startLaneY = Math.min(startLane.y, endLane.y);
-            const endLaneY = Math.max(startLane.y, endLane.y);
+              const startLaneX = Math.min(startLane.x, endLane.x);
+              const endLaneX = Math.max(startLane.x, endLane.x);
 
-            for (
-              let laneY = startLaneY;
-              laneY <= endLaneY;
-              laneY += ROAD_LANE_SIZE
-            ) {
-              this.dragTiles.add(`${startLane.x},${laneY}`);
-              // For 2-way roads, add parallel lane to the right
-              if (isTwoWay) {
-                this.dragTiles.add(`${startLane.x + ROAD_LANE_SIZE},${laneY}`);
+              for (let laneX = startLaneX; laneX <= endLaneX; laneX += ROAD_LANE_SIZE) {
+                this.dragTiles.add(`${laneX},${startLane.y}`);
+              }
+            } else if (this.dragDirection === "vertical") {
+              const startY = Math.min(this.dragStartTile.y, tileY);
+              const endY = Math.max(this.dragStartTile.y, tileY);
+              const startLane = getRoadLaneOrigin(this.dragStartTile.x, startY);
+              const endLane = getRoadLaneOrigin(this.dragStartTile.x, endY);
+
+              const startLaneY = Math.min(startLane.y, endLane.y);
+              const endLaneY = Math.max(startLane.y, endLane.y);
+
+              for (let laneY = startLaneY; laneY <= endLaneY; laneY += ROAD_LANE_SIZE) {
+                this.dragTiles.add(`${startLane.x},${laneY}`);
               }
             }
           }
@@ -908,22 +920,19 @@ export class MainScene extends Phaser.Scene {
           this.dragDirection = null;
 
           if (
-            this.selectedTool === ToolType.RoadLane ||
-            this.selectedTool === ToolType.RoadTurn ||
             this.selectedTool === ToolType.TwoWayRoad ||
             this.selectedTool === ToolType.SidewalklessRoad
           ) {
-            // For road lanes, add the initial lane origin (snapped to 2x2 grid)
-            const laneOrigin = getRoadLaneOrigin(
-              this.hoverTile.x,
-              this.hoverTile.y
-            );
+            // For 2-way roads, use lot origin (snapped to 8x8 grid)
+            const lotOrigin = getLotOrigin(this.hoverTile.x, this.hoverTile.y);
+            this.dragTiles.add(`${lotOrigin.x},${lotOrigin.y}`);
+          } else if (
+            this.selectedTool === ToolType.RoadLane ||
+            this.selectedTool === ToolType.RoadTurn
+          ) {
+            // For 1-way road lanes, use lane origin (snapped to 2x2 grid)
+            const laneOrigin = getRoadLaneOrigin(this.hoverTile.x, this.hoverTile.y);
             this.dragTiles.add(`${laneOrigin.x},${laneOrigin.y}`);
-            // For 2-way roads, also add the parallel lane
-            if (this.selectedTool === ToolType.TwoWayRoad || this.selectedTool === ToolType.SidewalklessRoad) {
-              // Add parallel lane (below for horizontal default, right for vertical)
-              this.dragTiles.add(`${laneOrigin.x},${laneOrigin.y + ROAD_LANE_SIZE}`);
-            }
           } else {
             // For other tools, add the tile directly
             this.dragTiles.add(`${this.hoverTile.x},${this.hoverTile.y}`);
@@ -2590,99 +2599,48 @@ export class MainScene extends Phaser.Scene {
         }
       }
     } else if (this.selectedTool === ToolType.TwoWayRoad || this.selectedTool === ToolType.SidewalklessRoad) {
-      // Get lanes to preview - either drag set or just hover lane
-      const lanesToPreview: Array<{ x: number; y: number }> = [];
+      // LOT-BASED PREVIEW: Show 8x8 lots
+      const lotsToPreview: Array<{ x: number; y: number }> = [];
       if (this.isDragging && this.dragTiles.size > 0) {
         this.dragTiles.forEach((key) => {
-          const [laneX, laneY] = key.split(",").map(Number);
-          lanesToPreview.push({ x: laneX, y: laneY });
+          const [lotX, lotY] = key.split(",").map(Number);
+          lotsToPreview.push({ x: lotX, y: lotY });
         });
       } else if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
-        // Single hover - show preview for hovered lane pair (2 parallel lanes)
-        const laneOrigin = getRoadLaneOrigin(x, y);
-        lanesToPreview.push({ x: laneOrigin.x, y: laneOrigin.y });
-        // Add parallel lane (below for horizontal start, right for vertical start)
-        lanesToPreview.push({ x: laneOrigin.x, y: laneOrigin.y + ROAD_LANE_SIZE });
+        // Single hover - show preview for hovered lot (snapped to 8x8 grid)
+        const lotOrigin = getLotOrigin(x, y);
+        lotsToPreview.push({ x: lotOrigin.x, y: lotOrigin.y });
       }
 
-      // Draw lanes
-      for (const lane of lanesToPreview) {
-        const placementCheck = canPlaceRoadLane(this.grid, lane.x, lane.y);
-        const hasCollision = !placementCheck.valid;
-
-        for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
-          for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
-            const px = lane.x + dx;
-            const py = lane.y + dy;
-            if (px < GRID_WIDTH && py < GRID_HEIGHT) {
+      // Draw each lot preview (8x8 tiles per lot)
+      for (const lot of lotsToPreview) {
+        for (let dy = 0; dy < LOT_SIZE; dy++) {
+          for (let dx = 0; dx < LOT_SIZE; dx++) {
+            const px = lot.x + dx;
+            const py = lot.y + dy;
+            if (px >= 0 && px < GRID_WIDTH && py >= 0 && py < GRID_HEIGHT) {
+              const cell = this.grid[py]?.[px];
               const screenPos = this.gridToScreen(px, py);
-              const preview = this.add.image(screenPos.x, screenPos.y, "asphalt");
+
+              // Determine texture: lanes in center (2-5), sidewalks on edges (0-1, 6-7)
+              const isLaneArea = dx >= 2 && dx < 6 && dy >= 2 && dy < 6;
+              const textureKey = isLaneArea ? "asphalt" : "road"; // road = sidewalk texture
+
+              // Check collision
+              let hasCollision = false;
+              if (cell && cell.type !== TileType.Grass && cell.type !== TileType.Sidewalk &&
+                  cell.type !== TileType.RoadLane && cell.type !== TileType.RoadTurn) {
+                hasCollision = true;
+              }
+
+              const preview = this.add.image(screenPos.x, screenPos.y, textureKey);
               preview.setOrigin(0.5, 0);
               preview.setScale(SUBTILE_WIDTH / preview.width, SUBTILE_HEIGHT / preview.height);
-              preview.setAlpha(hasCollision ? 0.3 : 0.7);
+              preview.setAlpha(hasCollision ? 0.3 : 0.6);
               if (hasCollision) preview.setTint(0xff0000);
               preview.setDepth(this.depthFromSortPoint(screenPos.x, screenPos.y, 1_000_000));
               this.previewSprites.push(preview);
             }
-          }
-        }
-      }
-
-      // Draw sidewalk previews on outer edges (only for TwoWayRoad, not SidewalklessRoad)
-      if (this.selectedTool === ToolType.TwoWayRoad && lanesToPreview.length > 0) {
-        // Determine orientation from drag or assume vertical for hover
-        const orientation = this.dragDirection || "vertical";
-        const sidewalkTiles: Array<{ x: number; y: number }> = [];
-
-        if (orientation === "horizontal") {
-          const lanesByX = new Map<number, number[]>();
-          for (const lane of lanesToPreview) {
-            if (!lanesByX.has(lane.x)) lanesByX.set(lane.x, []);
-            lanesByX.get(lane.x)!.push(lane.y);
-          }
-          for (const [lx, ys] of lanesByX) {
-            const minY = Math.min(...ys);
-            const maxY = Math.max(...ys);
-            // 2x2 sidewalk blocks above and below
-            for (let sy = 0; sy < ROAD_LANE_SIZE; sy++) {
-              for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
-                sidewalkTiles.push({ x: lx + dx, y: minY - ROAD_LANE_SIZE + sy });
-                sidewalkTiles.push({ x: lx + dx, y: maxY + ROAD_LANE_SIZE + sy });
-              }
-            }
-          }
-        } else {
-          const lanesByY = new Map<number, number[]>();
-          for (const lane of lanesToPreview) {
-            if (!lanesByY.has(lane.y)) lanesByY.set(lane.y, []);
-            lanesByY.get(lane.y)!.push(lane.x);
-          }
-          for (const [ly, xs] of lanesByY) {
-            const minX = Math.min(...xs);
-            const maxX = Math.max(...xs);
-            // 2x2 sidewalk blocks left and right
-            for (let sx = 0; sx < ROAD_LANE_SIZE; sx++) {
-              for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
-                sidewalkTiles.push({ x: minX - ROAD_LANE_SIZE + sx, y: ly + dy });
-                sidewalkTiles.push({ x: maxX + ROAD_LANE_SIZE + sx, y: ly + dy });
-              }
-            }
-          }
-        }
-
-        // Draw sidewalk previews
-        for (const tile of sidewalkTiles) {
-          if (tile.x >= 0 && tile.x < GRID_WIDTH && tile.y >= 0 && tile.y < GRID_HEIGHT) {
-            const cell = this.grid[tile.y]?.[tile.x];
-            const hasCollision = cell?.type !== TileType.Grass;
-            const screenPos = this.gridToScreen(tile.x, tile.y);
-            const preview = this.add.image(screenPos.x, screenPos.y, "road");
-            preview.setOrigin(0.5, 0);
-            preview.setScale(SUBTILE_WIDTH / preview.width, SUBTILE_HEIGHT / preview.height);
-            preview.setAlpha(hasCollision ? 0.2 : 0.5);
-            if (hasCollision) preview.setTint(0xff0000);
-            preview.setDepth(this.depthFromSortPoint(screenPos.x, screenPos.y, 1_000_000));
-            this.previewSprites.push(preview);
           }
         }
       }

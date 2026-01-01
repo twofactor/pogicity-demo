@@ -1,4 +1,4 @@
-import { TileType, GridCell, Direction, GRID_WIDTH, GRID_HEIGHT, ROAD_LANE_SIZE } from "./types";
+import { TileType, GridCell, Direction, GRID_WIDTH, GRID_HEIGHT, ROAD_LANE_SIZE, LOT_SIZE, getLotOrigin } from "./types";
 
 // ============================================
 // CONSTANTS
@@ -346,4 +346,328 @@ export function isWalkable(grid: GridCell[][], x: number, y: number): boolean {
 export function isDrivable(grid: GridCell[][], x: number, y: number): boolean {
   const cell = grid[Math.floor(y)]?.[Math.floor(x)];
   return isRoadTileType(cell?.type) || cell?.type === TileType.Asphalt;
+}
+
+// ============================================
+// LOT-BASED ROAD PLACEMENT
+// ============================================
+
+// Check if a lot contains any road infrastructure
+export function hasRoadInLot(grid: GridCell[][], lotX: number, lotY: number): boolean {
+  for (let dy = 0; dy < LOT_SIZE; dy++) {
+    for (let dx = 0; dx < LOT_SIZE; dx++) {
+      const cell = grid[lotY + dy]?.[lotX + dx];
+      if (cell && (cell.type === TileType.RoadLane || cell.type === TileType.RoadTurn)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Get which adjacent lots have roads
+export interface AdjacentRoads {
+  north: boolean;
+  south: boolean;
+  east: boolean;
+  west: boolean;
+}
+
+export function getAdjacentRoadLots(grid: GridCell[][], lotX: number, lotY: number): AdjacentRoads {
+  return {
+    north: lotY >= LOT_SIZE && hasRoadInLot(grid, lotX, lotY - LOT_SIZE),
+    south: lotY + LOT_SIZE < GRID_HEIGHT && hasRoadInLot(grid, lotX, lotY + LOT_SIZE),
+    east: lotX + LOT_SIZE < GRID_WIDTH && hasRoadInLot(grid, lotX + LOT_SIZE, lotY),
+    west: lotX >= LOT_SIZE && hasRoadInLot(grid, lotX - LOT_SIZE, lotY),
+  };
+}
+
+// Place a complete road lot with proper lane structure
+// Returns list of modified tiles
+export function placeRoadLot(
+  grid: GridCell[][],
+  lotX: number,
+  lotY: number,
+  adj?: AdjacentRoads
+): Array<{ x: number; y: number }> {
+  const dirtyTiles: Array<{ x: number; y: number }> = [];
+
+  // Get adjacent roads if not provided
+  if (!adj) {
+    adj = getAdjacentRoadLots(grid, lotX, lotY);
+  }
+
+  // Count connections
+  const connectionCount = [adj.north, adj.south, adj.east, adj.west].filter(Boolean).length;
+
+  // Clear the lot first - fill with grass
+  for (let dy = 0; dy < LOT_SIZE; dy++) {
+    for (let dx = 0; dx < LOT_SIZE; dx++) {
+      const x = lotX + dx;
+      const y = lotY + dy;
+      if (x < GRID_WIDTH && y < GRID_HEIGHT && grid[y]?.[x]) {
+        grid[y][x] = { type: TileType.Grass, x, y };
+      }
+    }
+  }
+
+  // Determine road configuration based on adjacent lots
+  // Default to horizontal road if isolated or ambiguous
+  const hasHorizontal = adj.east || adj.west || connectionCount === 0;
+  const hasVertical = adj.north || adj.south;
+  const isIntersection = hasHorizontal && hasVertical;
+  const isVertical = hasVertical && !hasHorizontal;
+  // isHorizontal is the default (including isolated lots)
+
+  // Road layout within 8x8 lot:
+  // - Center lanes: columns 2-5, rows 2-5 (4x4 area, four 2x2 lane blocks)
+  // - Edge extensions: when connected, lanes extend to lot edge
+  // - Sidewalks: fill remaining space on non-connected edges
+
+  // Place center road lanes (always present)
+  if (isIntersection) {
+    // Intersection: 4 turn tiles allowing straight or right turn
+    placeLane2x2(grid, lotX + 2, lotY + 2, Direction.Down, TileType.RoadTurn, dirtyTiles);
+    placeLane2x2(grid, lotX + 4, lotY + 2, Direction.Left, TileType.RoadTurn, dirtyTiles);
+    placeLane2x2(grid, lotX + 2, lotY + 4, Direction.Right, TileType.RoadTurn, dirtyTiles);
+    placeLane2x2(grid, lotX + 4, lotY + 4, Direction.Up, TileType.RoadTurn, dirtyTiles);
+  } else if (isVertical) {
+    // Vertical road: lanes going down (left column) and up (right column)
+    placeLane2x2(grid, lotX + 2, lotY + 2, Direction.Down, TileType.RoadLane, dirtyTiles);
+    placeLane2x2(grid, lotX + 4, lotY + 2, Direction.Up, TileType.RoadLane, dirtyTiles);
+    placeLane2x2(grid, lotX + 2, lotY + 4, Direction.Down, TileType.RoadLane, dirtyTiles);
+    placeLane2x2(grid, lotX + 4, lotY + 4, Direction.Up, TileType.RoadLane, dirtyTiles);
+  } else {
+    // Horizontal road: lanes going left (top row) and right (bottom row)
+    placeLane2x2(grid, lotX + 2, lotY + 2, Direction.Left, TileType.RoadLane, dirtyTiles);
+    placeLane2x2(grid, lotX + 4, lotY + 2, Direction.Left, TileType.RoadLane, dirtyTiles);
+    placeLane2x2(grid, lotX + 2, lotY + 4, Direction.Right, TileType.RoadLane, dirtyTiles);
+    placeLane2x2(grid, lotX + 4, lotY + 4, Direction.Right, TileType.RoadLane, dirtyTiles);
+  }
+
+  // Extend lanes to edges where connections exist
+  // West edge (columns 0-1, rows 2-5) - extend horizontal lanes
+  if (adj.west || isIntersection || !isVertical) {
+    if (adj.west) {
+      // Connected west: extend lanes to edge
+      placeLane2x2(grid, lotX + 0, lotY + 2, Direction.Left, TileType.RoadLane, dirtyTiles);
+      placeLane2x2(grid, lotX + 0, lotY + 4, Direction.Right, TileType.RoadLane, dirtyTiles);
+    } else {
+      // Not connected: place sidewalk
+      for (let dy = 2; dy < 6; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+        }
+      }
+    }
+  } else {
+    // Vertical road, no west connection: sidewalk
+    for (let dy = 2; dy < 6; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+      }
+    }
+  }
+
+  // East edge (columns 6-7, rows 2-5) - extend horizontal lanes
+  if (adj.east || isIntersection || !isVertical) {
+    if (adj.east) {
+      // Connected east: extend lanes to edge
+      placeLane2x2(grid, lotX + 6, lotY + 2, Direction.Left, TileType.RoadLane, dirtyTiles);
+      placeLane2x2(grid, lotX + 6, lotY + 4, Direction.Right, TileType.RoadLane, dirtyTiles);
+    } else {
+      // Not connected: place sidewalk
+      for (let dy = 2; dy < 6; dy++) {
+        for (let dx = 6; dx < 8; dx++) {
+          placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+        }
+      }
+    }
+  } else {
+    // Vertical road, no east connection: sidewalk
+    for (let dy = 2; dy < 6; dy++) {
+      for (let dx = 6; dx < 8; dx++) {
+        placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+      }
+    }
+  }
+
+  // North edge (rows 0-1, columns 2-5) - extend vertical lanes
+  if (adj.north || isIntersection || isVertical) {
+    if (adj.north) {
+      // Connected north: extend lanes to edge
+      placeLane2x2(grid, lotX + 2, lotY + 0, Direction.Down, TileType.RoadLane, dirtyTiles);
+      placeLane2x2(grid, lotX + 4, lotY + 0, Direction.Up, TileType.RoadLane, dirtyTiles);
+    } else {
+      // Not connected: place sidewalk
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 2; dx < 6; dx++) {
+          placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+        }
+      }
+    }
+  } else {
+    // Horizontal road, no north connection: sidewalk
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 2; dx < 6; dx++) {
+        placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+      }
+    }
+  }
+
+  // South edge (rows 6-7, columns 2-5) - extend vertical lanes
+  if (adj.south || isIntersection || isVertical) {
+    if (adj.south) {
+      // Connected south: extend lanes to edge
+      placeLane2x2(grid, lotX + 2, lotY + 6, Direction.Down, TileType.RoadLane, dirtyTiles);
+      placeLane2x2(grid, lotX + 4, lotY + 6, Direction.Up, TileType.RoadLane, dirtyTiles);
+    } else {
+      // Not connected: place sidewalk
+      for (let dy = 6; dy < 8; dy++) {
+        for (let dx = 2; dx < 6; dx++) {
+          placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+        }
+      }
+    }
+  } else {
+    // Horizontal road, no south connection: sidewalk
+    for (let dy = 6; dy < 8; dy++) {
+      for (let dx = 2; dx < 6; dx++) {
+        placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+      }
+    }
+  }
+
+  // Corner sidewalks (always present - 2x2 areas at each corner)
+  // Top-left corner
+  for (let dy = 0; dy < 2; dy++) {
+    for (let dx = 0; dx < 2; dx++) {
+      placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+    }
+  }
+  // Top-right corner
+  for (let dy = 0; dy < 2; dy++) {
+    for (let dx = 6; dx < 8; dx++) {
+      placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+    }
+  }
+  // Bottom-left corner
+  for (let dy = 6; dy < 8; dy++) {
+    for (let dx = 0; dx < 2; dx++) {
+      placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+    }
+  }
+  // Bottom-right corner
+  for (let dy = 6; dy < 8; dy++) {
+    for (let dx = 6; dx < 8; dx++) {
+      placeSidewalk(grid, lotX + dx, lotY + dy, dirtyTiles);
+    }
+  }
+
+  // Track all dirty tiles
+  for (let dy = 0; dy < LOT_SIZE; dy++) {
+    for (let dx = 0; dx < LOT_SIZE; dx++) {
+      dirtyTiles.push({ x: lotX + dx, y: lotY + dy });
+    }
+  }
+
+  return dirtyTiles;
+}
+
+// Helper: Place a 2x2 lane block
+function placeLane2x2(
+  grid: GridCell[][],
+  originX: number,
+  originY: number,
+  direction: Direction,
+  tileType: TileType.RoadLane | TileType.RoadTurn,
+  dirtyTiles: Array<{ x: number; y: number }>
+): void {
+  for (let dy = 0; dy < ROAD_LANE_SIZE; dy++) {
+    for (let dx = 0; dx < ROAD_LANE_SIZE; dx++) {
+      const x = originX + dx;
+      const y = originY + dy;
+      if (x < GRID_WIDTH && y < GRID_HEIGHT && grid[y]?.[x]) {
+        grid[y][x] = {
+          type: tileType,
+          x,
+          y,
+          isOrigin: dx === 0 && dy === 0,
+          originX,
+          originY,
+          laneDirection: direction,
+        };
+      }
+    }
+  }
+}
+
+// Helper: Place a single sidewalk tile
+function placeSidewalk(
+  grid: GridCell[][],
+  x: number,
+  y: number,
+  dirtyTiles: Array<{ x: number; y: number }>
+): void {
+  if (x < GRID_WIDTH && y < GRID_HEIGHT && grid[y]?.[x]) {
+    // Only place if not already a road
+    const cell = grid[y][x];
+    if (cell.type !== TileType.RoadLane && cell.type !== TileType.RoadTurn) {
+      grid[y][x] = { type: TileType.Sidewalk, x, y };
+    }
+  }
+}
+
+// Remove all road infrastructure from a lot
+export function removeRoadLot(
+  grid: GridCell[][],
+  lotX: number,
+  lotY: number
+): Array<{ x: number; y: number }> {
+  const dirtyTiles: Array<{ x: number; y: number }> = [];
+
+  for (let dy = 0; dy < LOT_SIZE; dy++) {
+    for (let dx = 0; dx < LOT_SIZE; dx++) {
+      const x = lotX + dx;
+      const y = lotY + dy;
+      if (x < GRID_WIDTH && y < GRID_HEIGHT && grid[y]?.[x]) {
+        grid[y][x] = { type: TileType.Grass, x, y };
+        dirtyTiles.push({ x, y });
+      }
+    }
+  }
+
+  return dirtyTiles;
+}
+
+// Update a road lot and its neighbors (call after placing or removing a lot)
+export function updateLotAndNeighbors(
+  grid: GridCell[][],
+  lotX: number,
+  lotY: number
+): Array<{ x: number; y: number }> {
+  const dirtyTiles: Array<{ x: number; y: number }> = [];
+
+  // Update the lot itself if it has roads
+  if (hasRoadInLot(grid, lotX, lotY)) {
+    dirtyTiles.push(...placeRoadLot(grid, lotX, lotY));
+  }
+
+  // Update adjacent lots
+  const neighbors = [
+    { x: lotX, y: lotY - LOT_SIZE }, // North
+    { x: lotX, y: lotY + LOT_SIZE }, // South
+    { x: lotX + LOT_SIZE, y: lotY }, // East
+    { x: lotX - LOT_SIZE, y: lotY }, // West
+  ];
+
+  for (const neighbor of neighbors) {
+    if (neighbor.x >= 0 && neighbor.y >= 0 &&
+        neighbor.x < GRID_WIDTH && neighbor.y < GRID_HEIGHT &&
+        hasRoadInLot(grid, neighbor.x, neighbor.y)) {
+      dirtyTiles.push(...placeRoadLot(grid, neighbor.x, neighbor.y));
+    }
+  }
+
+  return dirtyTiles;
 }
