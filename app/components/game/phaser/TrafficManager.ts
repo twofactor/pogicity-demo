@@ -171,7 +171,7 @@ export class TrafficManager {
     // Check if there's already a car at this position
     for (const car of this.cars) {
       const dist = Math.sqrt(Math.pow(car.x - center.x, 2) + Math.pow(car.y - center.y, 2));
-      if (dist < 1.5) return false; // Too close to existing car
+      if (dist < 2.5) return false; // Too close to existing car (room for trucks)
     }
 
     // Pick random car type
@@ -373,7 +373,7 @@ export class TrafficManager {
       const dx = car.x - x;
       const dy = car.y - y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 1.5) {
+      if (dist < 2.0) { // Room for larger vehicles like trucks
         return true;
       }
     }
@@ -434,7 +434,7 @@ export class TrafficManager {
   // Check if blocked by another car ahead
   private isBlockedByOtherCar(car: Car): boolean {
     const vec = directionVectors[car.direction];
-    const checkDist = 1.5; // Check 1.5 units ahead
+    const checkDist = 2.0; // Check 2 units ahead (room for larger vehicles)
     const aheadX = car.x + vec.dx * checkDist;
     const aheadY = car.y + vec.dy * checkDist;
 
@@ -445,7 +445,7 @@ export class TrafficManager {
       const dy = other.y - aheadY;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist < 1.0) {
+      if (dist < 1.5) {
         // Check if the other car is actually ahead of us
         const dotProduct = (other.x - car.x) * vec.dx + (other.y - car.y) * vec.dy;
         if (dotProduct > 0) {

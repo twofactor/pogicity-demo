@@ -205,6 +205,27 @@ export class CitizenManager {
     nextX += moveVec.dx * speed;
     nextY += moveVec.dy * speed;
 
+    // Soft collision avoidance - try not to overlap other characters
+    const nearbyChar = this.getCharacterAhead(char, nextX, nextY);
+    if (nearbyChar) {
+      // In crosswalk: keep moving (don't block traffic flow)
+      // On sidewalk: 70% chance to wait, 30% chance to squeeze by
+      if (!nowInCrossingMode && Math.random() < 0.7) {
+        // Try a different direction instead of waiting
+        const altDir = this.findAlternateDirection(char, tileX, tileY, newDirection);
+        if (altDir) {
+          const altVec = directionVectors[altDir];
+          nextX = x + altVec.dx * speed;
+          nextY = y + altVec.dy * speed;
+          newDirection = altDir;
+        } else {
+          // No alternate path, just wait briefly
+          return { ...char, direction: newDirection, inCrosswalk: nowInCrossingMode };
+        }
+      }
+      // Otherwise squeeze by (allow some overlap)
+    }
+
     // Validate final position
     const finalTileX = Math.floor(nextX);
     const finalTileY = Math.floor(nextY);
@@ -219,6 +240,50 @@ export class CitizenManager {
     }
 
     return { ...char, x: nextX, y: nextY, direction: newDirection, inCrosswalk: finalIsRoad };
+  }
+
+  // ============================================
+  // COLLISION AVOIDANCE
+  // ============================================
+
+  /** Check if another character is near the target position */
+  private getCharacterAhead(char: Character, targetX: number, targetY: number): Character | null {
+    const collisionDist = 0.4; // How close is "too close"
+
+    for (const other of this.characters) {
+      if (other.id === char.id) continue;
+
+      const dx = other.x - targetX;
+      const dy = other.y - targetY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < collisionDist) {
+        return other;
+      }
+    }
+    return null;
+  }
+
+  /** Find an alternate walkable direction that avoids the blocked direction */
+  private findAlternateDirection(char: Character, tileX: number, tileY: number, blockedDir: Direction): Direction | null {
+    const validDirs = this.getValidDirections(tileX, tileY);
+    const opposite = oppositeDirection[blockedDir];
+
+    // Filter out blocked direction and prefer not going backwards
+    const alternatives = validDirs.filter(d => d !== blockedDir && d !== opposite);
+
+    // Check each alternative for other characters
+    for (const dir of alternatives) {
+      const vec = directionVectors[dir];
+      const testX = char.x + vec.dx * 0.5;
+      const testY = char.y + vec.dy * 0.5;
+
+      if (!this.getCharacterAhead(char, testX, testY)) {
+        return dir;
+      }
+    }
+
+    return null;
   }
 
   // ============================================
