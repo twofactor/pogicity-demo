@@ -301,10 +301,15 @@ Clean up your renders and ensure consistency:
 
 ## Asset Usage
 
-### Buildings, Props, Tiles
-All building sprites, props, and tile graphics in this repository are free to use in your own projects, including commercial games.
+### Code
+The source code is MIT licensed - use it however you like.
 
-### Characters (Important!)
+### Art Assets (Buildings, Props, Tiles)
+The art assets in this repository are provided for **learning, demos, and prototyping**. Some assets were created for this project, others are from commercial asset packs with varying licenses.
+
+**If you're releasing a game**, you should create or commission your own art assets to avoid any licensing issues.
+
+### Characters
 The character sprites (walking GIFs in `/public/Characters/`) are **NOT included in the open source license**. These are proprietary characters.
 
 **You may:**

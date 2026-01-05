@@ -24,15 +24,10 @@ SOFTWARE.
 
 ASSET EXCEPTION:
 
-The character sprites located in `/public/Characters/` are NOT covered by this
-MIT License. These character assets are proprietary and may only be used for:
-- Demos and prototypes
-- Learning and educational purposes
-- Non-commercial projects
+This MIT License applies to the SOURCE CODE only.
 
-They may NOT be:
-- Included in published or released games
-- Redistributed separately
-- Used in commercial products
+Art assets (sprites, images, etc.) in the /public directory are NOT covered by
+this license. Some assets were created for this project, others are from
+commercial asset packs with varying licenses.
 
-For released games, please create or commission your own character sprites.
+For released games, please create or commission your own art assets.
