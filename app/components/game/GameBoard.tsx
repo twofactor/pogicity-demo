@@ -965,8 +965,8 @@ export default function GameBoard() {
     const existingSaves: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key.startsWith("pogicity_save_")) {
-        existingSaves.push(key.replace("pogicity_save_", ""));
+      if (key && key.startsWith("bombaycity_save_")) {
+        existingSaves.push(key.replace("bombaycity_save_", ""));
       }
     }
 
@@ -989,7 +989,7 @@ export default function GameBoard() {
 
           try {
             localStorage.setItem(
-              `pogicity_save_${saveName}`,
+              `bombaycity_save_${saveName}`,
               JSON.stringify(saveData)
             );
             setModalState({
@@ -1030,7 +1030,7 @@ export default function GameBoard() {
 
           try {
             localStorage.setItem(
-              `pogicity_save_${finalName}`,
+              `bombaycity_save_${finalName}`,
               JSON.stringify(saveData)
             );
             setModalState({

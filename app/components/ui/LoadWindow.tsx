@@ -44,9 +44,9 @@ export default function LoadWindow({
     const allSaves: Array<{ name: string; data: GameSaveData }> = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key.startsWith('pogicity_save_')) {
+      if (key && key.startsWith('bombaycity_save_')) {
         try {
-          const saveName = key.replace('pogicity_save_', '');
+          const saveName = key.replace('bombaycity_save_', '');
           const saveData = JSON.parse(localStorage.getItem(key) || '{}');
           allSaves.push({ name: saveName, data: saveData });
         } catch (e) {
@@ -105,7 +105,7 @@ export default function LoadWindow({
     const saveNameToDelete = saveNameToDeleteRef.current;
     if (!saveNameToDelete) return;
     
-    localStorage.removeItem(`pogicity_save_${saveNameToDelete}`);
+    localStorage.removeItem(`bombaycity_save_${saveNameToDelete}`);
     setSaves(prevSaves => prevSaves.filter(s => s.name !== saveNameToDelete));
     setDeleteModalState({ isVisible: false, saveName: "" });
     saveNameToDeleteRef.current = "";

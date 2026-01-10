@@ -45,6 +45,7 @@ function getBuildingPreviewZoom(building: BuildingDefinition): number {
 
 // Tab icons for each category
 const CATEGORY_ICONS: Record<BuildingCategory, string> = {
+  mumbai_landmarks: "🇮🇳",
   residential: "🏠",
   commercial: "🏪",
   props: "🌳",
